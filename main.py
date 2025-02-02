@@ -1,9 +1,11 @@
 import pandas as pd
 from ast import literal_eval
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil import parser
 
-'''Добавить проверку что указанные в equipment_disrupted_flights индексы есть в problematic_aircraft_equipment'''
+'''
+Добавить проверку что переданные в equipment_disrupted_flights() индексы есть в df_problematic_aircraft_equipment.csv
+'''
 
 # парк доступных вс
 fleet = pd.read_csv('csv_files/df_aircraft.csv', sep=';')
@@ -22,10 +24,22 @@ problematic_aircraft_equipment = pd.read_csv('csv_files/df_problematic_aircraft_
 problematic_flight_shift = pd.read_csv('csv_files/df_problematic_flight_shift.csv', sep=';')
 
 
-def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame, previous_solution_table: pd.DataFrame,
-                                disruptions_table: pd.DataFrame, *disruption_ids: int) -> list:
+def nearest_flights_selection(previous_solution_table: pd.DataFrame, current_time: datetime):
+    previous_solution_departure_times = pd.to_datetime(previous_solution_table['departure_time'],
+                                                       format='%Y-%m-%d %H:%M:%S')
+    mask = (current_time <= previous_solution_departure_times) & (previous_solution_departure_times < current_time + timedelta(days=3))
+    previous_solution_table = previous_solution_table[mask]
+    return previous_solution_table
+
+
+def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
+                                previous_solution_table: pd.DataFrame,
+                                disruptions_table: pd.DataFrame,
+                                current_time: datetime,
+                                *disruption_ids: int) -> list:
     disruptions_table = disruptions_table.loc[[*disruption_ids]]
     problematic_aircrafts = disruptions_table['aircraft_id'].tolist()
+    previous_solution_table = nearest_flights_selection(previous_solution_table, current_time)
 
     # Структура словаря: ключи - id самолетов с изменением оборудования,
     # значения - индексы нового оборудования
@@ -45,8 +59,9 @@ def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame, previous_
     for aircraft_id in problematic_aircrafts:
         flight_equipments_subtable = flight_equipments_table[flight_equipments_table['flight_id'].isin(problematic_flights_id[aircraft_id])]
         for flight_id in problematic_flights_id[aircraft_id]:
+            previous_solution_id = previous_solution_table[previous_solution_table['flight_id'] == flight_id]['previous_solution_id'].iloc[0]
             if new_equipment_dict[aircraft_id] not in literal_eval(flight_equipments_subtable[flight_equipments_subtable['flight_id'] == flight_id]['equipment_ids'].iloc[0]):
-                disrupted_flights.append((flight_id, aircraft_id))
+                disrupted_flights.append((flight_id, aircraft_id, int(previous_solution_id)))
 
     return disrupted_flights
 
@@ -60,7 +75,8 @@ def get_time_from_table(table: pd.DataFrame, previous_solution_id: int, column_n
     return time_object
 
 
-def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame, disruptions_table: pd.DataFrame,
+def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
+                                   disruptions_table: pd.DataFrame,
                                    *disruption_ids: int) -> list:
     """Надо проверять остается ли окно в 50 мин до след рейса"""
     problematic_aircrafts = disruptions_table['aircraft_id'].tolist()
