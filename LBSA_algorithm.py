@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def inverse(permutation, i, j):
     """inverse the cities between positions i and j"""
     result_permutation = permutation.copy()
@@ -23,3 +26,15 @@ def swap(permutation, i, j):
     result_permutation = permutation.copy()
     result_permutation[i], result_permutation[j] = result_permutation[j], result_permutation[i]
     return result_permutation
+
+
+def calculate_distance_of_permutation(permutation: list):
+    distances_matrix = np.random.randint(1, 15, (5, 5), dtype=int)
+    print(distances_matrix)
+    result = sum([distances_matrix[i][i + 1] for i in permutation[0:-1]]) + distances_matrix[len(permutation) - 1][permutation[0]]
+    return result
+
+
+def hybrid_operator(permutation, i, j, op_1, op_2, op_3):
+    return min(op_1(permutation, i, j), op_2(permutation, i, j), op_3(permutation, i, j),
+               key=lambda x: calculate_distance_of_permutation(permutation))
