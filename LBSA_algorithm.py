@@ -1,6 +1,5 @@
 import math
 import random
-
 import numpy as np
 
 
@@ -43,21 +42,9 @@ def hybrid_operator(permutation, i, j, op_1, op_2, op_3):
                key=lambda x: calculate_distance_of_permutation(permutation))
 
 
-def temperature_calculating_func(current_solution, candidate_solution, acceptable_probability) -> float:
-    current_solution_distance_sum = calculate_distance_of_permutation(current_solution)
-    candidate_solution_distance_sum = calculate_distance_of_permutation(candidate_solution)
-    temperature = (candidate_solution_distance_sum - current_solution_distance_sum) / - math.log(acceptable_probability)
-    return temperature
-
-
-# for SA algorithm
-def probability_function(current_solution, candidate_solution, temperature):
-    current_solution_distance_sum = calculate_distance_of_permutation(current_solution)
-    candidate_solution_distance_sum = calculate_distance_of_permutation(candidate_solution)
-    if candidate_solution_distance_sum <= current_solution_distance_sum:
-        return 1
-    probability = math.exp(-(candidate_solution_distance_sum - current_solution_distance_sum) / temperature)
-    return probability
+def generate_candidate_solution(current_solution):
+    i, j = random.sample(range(len(current_solution)), 2)
+    return hybrid_operator(current_solution, i, j, inverse, insert, swap)
 
 
 def list_based_sa_algorithm(temperature_list, max_iteration_times, markov_chain_length, amount_of_citys):
@@ -75,8 +62,7 @@ def list_based_sa_algorithm(temperature_list, max_iteration_times, markov_chain_
             # Generate a candidate solution y randomly
             # based on current solution x and a specified
             # neighbourhood structure
-            candidate_solution = current_solution.copy()
-            random.shuffle(candidate_solution)
+            candidate_solution = generate_candidate_solution(current_solution)
 
             inner_loop_iterator += 1
             current_solution_distance_sum = calculate_distance_of_permutation(current_solution)
