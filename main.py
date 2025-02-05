@@ -24,7 +24,7 @@ problematic_aircraft_equipment = pd.read_csv('csv_files/df_problematic_aircraft_
 problematic_flight_shift = pd.read_csv('csv_files/df_problematic_flight_shift.csv', sep=';')
 
 
-def nearest_flights_selection(previous_solution_table: pd.DataFrame, current_time: datetime):
+def nearest_flights_selection(previous_solution_table: pd.DataFrame, current_time: datetime) -> pd.DataFrame:
     previous_solution_departure_times = pd.to_datetime(previous_solution_table['departure_time'],
                                                        format='%Y-%m-%d %H:%M:%S')
     mask = (current_time <= previous_solution_departure_times) & (previous_solution_departure_times < current_time + timedelta(days=3))
@@ -97,3 +97,33 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
             disrupted_flights.append((flight_id, aircraft_id))
 
     return disrupted_flights
+
+
+def generate_airport_pairs(previous_solution_table: pd.DataFrame) -> list:
+    """Возвращает список кортежей, в которых хранятся previous_solution_id для соединенных рейсов"""
+    airports_table = previous_solution_table[['departure_airport_code', 'arrival_airport_code', 'previous_solution_id']]
+    departure_airport_row = airports_table['departure_airport_code']
+    arrival_airport_row = airports_table['arrival_airport_code']
+    previous_solution_id_row = airports_table['previous_solution_id']
+    airport_pairs_list = []
+    for i in range(len(airports_table)):
+        flight_dict = {'departure_airport': departure_airport_row.iloc[i],
+                       'arrival_airport': arrival_airport_row.iloc[i],
+                       'previous_solution_id': int(previous_solution_id_row.iloc[i])}
+        airport_pairs_list.append(flight_dict)
+
+    return airport_pairs_list
+
+
+def base_airports_partition(airport_pairs_list: list, *base_airports: str) -> list:
+    """LED, KJA. Отдельно обработать полеты из базы в базу"""
+    partition_list = []
+    current_part = []
+    for flight in airport_pairs_list:
+        current_part.append(flight)
+        if flight['arrival_airport'] in base_airports:
+            partition_list.append(current_part)
+            current_part = []
+    if current_part:
+        partition_list.append(current_part)
+    return partition_list
