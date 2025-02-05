@@ -1,3 +1,6 @@
+import math
+import random
+
 import numpy as np
 
 
@@ -38,3 +41,62 @@ def calculate_distance_of_permutation(permutation: list):
 def hybrid_operator(permutation, i, j, op_1, op_2, op_3):
     return min(op_1(permutation, i, j), op_2(permutation, i, j), op_3(permutation, i, j),
                key=lambda x: calculate_distance_of_permutation(permutation))
+
+
+def temperature_calculating_func(current_solution, candidate_solution, acceptable_probability) -> float:
+    current_solution_distance_sum = calculate_distance_of_permutation(current_solution)
+    candidate_solution_distance_sum = calculate_distance_of_permutation(candidate_solution)
+    temperature = (candidate_solution_distance_sum - current_solution_distance_sum) / - math.log(acceptable_probability)
+    return temperature
+
+
+# for SA algorithm
+def probability_function(current_solution, candidate_solution, temperature):
+    current_solution_distance_sum = calculate_distance_of_permutation(current_solution)
+    candidate_solution_distance_sum = calculate_distance_of_permutation(candidate_solution)
+    if candidate_solution_distance_sum <= current_solution_distance_sum:
+        return 1
+    probability = math.exp(-(candidate_solution_distance_sum - current_solution_distance_sum) / temperature)
+    return probability
+
+
+def list_based_sa_algorithm(temperature_list, max_iteration_times, markov_chain_length, amount_of_citys):
+    outer_loop_iterator = 0
+    # Generate an initial solution x randomly
+    current_solution = [i for i in range(amount_of_citys)]
+    random.shuffle(current_solution)
+
+    while outer_loop_iterator <= max_iteration_times:
+        temperature_max = max(temperature_list)
+        outer_loop_iterator += 1
+        temperature = 0
+        bad_solution_count, inner_loop_iterator = 0, 0
+        while inner_loop_iterator <= markov_chain_length:
+            # Generate a candidate solution y randomly
+            # based on current solution x and a specified
+            # neighbourhood structure
+            candidate_solution = current_solution.copy()
+            random.shuffle(candidate_solution)
+
+            inner_loop_iterator += 1
+            current_solution_distance_sum = calculate_distance_of_permutation(current_solution)
+            candidate_solution_distance_sum = calculate_distance_of_permutation(candidate_solution)
+
+            if candidate_solution_distance_sum < current_solution_distance_sum:
+                current_solution = candidate_solution
+            else:
+                probability = math.exp(-(candidate_solution_distance_sum - current_solution_distance_sum) / temperature_max)
+                random_float = random.random()
+                if random_float < probability:
+                    temperature = (temperature - candidate_solution_distance_sum + current_solution_distance_sum) / math.log(random_float)
+                    bad_solution_count += 1
+                    current_solution = candidate_solution
+                else:
+                    pass
+
+        if bad_solution_count != 0:
+            temperature_list.remove(temperature_max)
+            temperature_list.append(temperature / bad_solution_count)
+
+    return current_solution
+
