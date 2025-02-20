@@ -85,6 +85,21 @@ def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
     return disrupted_flights
 
 
+def equipment_disrupted_flights_checker(flight_equipments_table: pd.DataFrame,
+                                        previous_solution_table: pd.DataFrame,
+                                        disruptions_table: pd.DataFrame,
+                                        current_time: datetime,
+                                        *disruption_ids: int) -> bool:
+    """Возвращает True если расписание остается верным(не ломается, иначе False"""
+    if len(equipment_disrupted_flights(flight_equipments_table,
+                                       previous_solution_table,
+                                       disruptions_table,
+                                       current_time,
+                                       *disruption_ids)) > 0:
+        return False
+    return True
+
+
 def get_time_from_table(table: pd.DataFrame, previous_solution_id: int, column_name: str) -> datetime:
     if 'new' not in column_name:
         previous_solution_id += 1
@@ -116,6 +131,14 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
             disrupted_flights.append((flight_id, aircraft_id))
 
     return disrupted_flights
+
+
+def flight_shift_disrupted_flights_checker(previous_solution_table: pd.DataFrame,
+                                           disruptions_table: pd.DataFrame,
+                                           *disruption_ids: int) -> bool:
+    if len(flight_shift_disrupted_flights(previous_solution_table, disruptions_table, *disruption_ids)) > 0:
+        return False
+    return True
 
 
 def generate_airport_pairs(previous_solution_table: pd.DataFrame) -> dict:
@@ -152,4 +175,3 @@ def base_airports_partition(previous_solution_table: pd.DataFrame, *base_airport
         if current_part:
             partition_list.append(current_part)
     return partition_list
-
