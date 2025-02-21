@@ -29,17 +29,21 @@ def nearest_flights_selection(previous_solution_table: pd.DataFrame,
                               *base_airports: str) -> pd.DataFrame:
     previous_solution_table_result = pd.DataFrame(columns=previous_solution_table.columns)
     for index, flight_row in previous_solution_table.iterrows():
-        if current_time <= pd.to_datetime(flight_row['departure_time'], format='%Y-%m-%d %H:%M:%S') < current_time + timedelta(days=3):
-            if pd.to_datetime(previous_solution_table.iloc[index + 1]['departure_time']) >= current_time + timedelta(days=3) and flight_row['arrival_airport_code'] not in base_airports:
+        if current_time <= pd.to_datetime(flight_row['departure_time'], format='%Y-%m-%d %H:%M:%S') <= current_time + timedelta(days=2, hours=23, minutes=59):
+            if pd.to_datetime(previous_solution_table.iloc[index + 1]['departure_time']) > current_time + timedelta(days=2, hours=23, minutes=59) and flight_row['arrival_airport_code'] not in base_airports:
                 previous_solution_table_result.loc[len(previous_solution_table_result.index)] = flight_row
                 sub_index = index + 1
                 base_airport_flag = 1
-                while base_airport_flag:
-                    if previous_solution_table.iloc[sub_index]['departure_airport_code'] in base_airports:
-                        base_airport_flag = 0
-                    else:
-                        previous_solution_table_result.loc[len(previous_solution_table_result.index)] = previous_solution_table.iloc[sub_index]
-                        sub_index += 1
+                if sub_index < len(previous_solution_table):
+                    while base_airport_flag:
+                        if previous_solution_table.iloc[sub_index]['departure_airport_code'] in base_airports:
+                            base_airport_flag = 0
+                        else:
+                            previous_solution_table_result.loc[len(previous_solution_table_result.index)] = previous_solution_table.iloc[sub_index]
+                            if sub_index < len(previous_solution_table) - 1:
+                                sub_index += 1
+                            else:
+                                base_airport_flag = 0
                 continue
             if index == 0:
                 if flight_row['departure_airport_code'] not in base_airports:
@@ -175,3 +179,8 @@ def base_airports_partition(previous_solution_table: pd.DataFrame, *base_airport
         if current_part:
             partition_list.append(current_part)
     return partition_list
+
+
+def flights_objective_function():
+    """Возвращаем 1 если переданное расписание корректно(не ломается от """
+
