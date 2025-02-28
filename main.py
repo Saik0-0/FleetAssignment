@@ -127,7 +127,6 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
     for disruption_id in disruption_ids:
         previous_solution_id = disruptions_table[disruptions_table['problematic_flight_shift_id'] == disruption_id]['previous_solution_id'].iloc[0]
         if previous_solution_id not in previous_solution_table['previous_solution_id'].values:
-            print(previous_solution_id)
             continue
 
         new_arrival_time = get_time_from_table(disruptions_table, previous_solution_id, 'new_arrival_time')
@@ -139,7 +138,7 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
         time_delta = next_departure_time - new_arrival_time
         # 50 минут = 3000 сек - минимальное окно между рейсами
         if time_delta.total_seconds() < 3000:
-            disrupted_flights.append({'flight_id': flight_id, 'aircraft_id': aircraft_id})
+            disrupted_flights.append({'flight_id': flight_id, 'aircraft_id': aircraft_id, 'previous_solution_id': int(previous_solution_id)})
 
     return disrupted_flights
 
@@ -206,12 +205,12 @@ def aircraft_flight_line(aircraft_id: int, nearest_schedule: pd.DataFrame) -> pd
     return aircraft_flights
 
 
-def extract_part_using_flight_id(flight_id: str, airports_partition: list) -> list:
+def extract_part_using_flight_id(aircraft_id: int, flight_id: str, airports_partition: list) -> list:
     """Возвращает связку с конкретным рейсом flight_id"""
     trigger_part = []
     for part in airports_partition:
         for flight in part:
-            if flight_id == flight['flight_id']:
+            if flight_id == flight['flight_id'] and str(aircraft_id) == flight['aircraft_id']:
                 trigger_part = part
     return trigger_part
 
@@ -223,24 +222,59 @@ def extract_part_from_timerange(aircraft_id: int, nearest_schedule: pd.DataFrame
         if ((pd.to_datetime(flight['departure_time']) >= timerange[0] and pd.to_datetime(flight['arrival_time']) <= timerange[1])
                 or (pd.to_datetime(flight['departure_time']) <= timerange[1] <= pd.to_datetime(flight['arrival_time']))
                 or (pd.to_datetime(flight['departure_time']) <= timerange[0] <= pd.to_datetime(flight['arrival_time']))):
-            return extract_part_using_flight_id(flight['flight_id'], airport_partition)
+            return extract_part_using_flight_id(aircraft_id, flight['flight_id'], airport_partition)
 
 
-def extract_trigger_time_range(trigger_flight_id: str, airports_partition: list) -> list:
+def extract_trigger_time_range(aircraft_id: int, trigger_flight_id: str, airports_partition: list) -> list:
     """Возвращает временной отрезок, в котором находится связка с триггерным рейсом"""
-    trigger_part = extract_part_using_flight_id(trigger_flight_id, airports_partition)
+    trigger_part = extract_part_using_flight_id(aircraft_id, trigger_flight_id, airports_partition)
     trigger_departure_time = trigger_part[0]['departure_time']
     trigger_arrival_time = trigger_part[-1]['arrival_time']
     return [trigger_departure_time, trigger_arrival_time]
 
 
-def swap(i: int, j: int, partition_list: list, disrupted_flights: list, nearest_flights: pd.DataFrame, trigger_aircraft_ids: list):
+def swap(trigger_aircraft: int,
+         health_aircraft: int,
+         partition_list: list,
+         equipment_disrupted_flights: list,
+         flight_shift_disrupted_list: list,
+         nearest_flights: pd.DataFrame,
+         trigger_aircraft_ids: list,
+         trigger_flight_id: str):
     """Делаем swap между ВС по связкам"""
-    if j in trigger_aircraft_ids and i in trigger_aircraft_ids:
-        i, j, = j, i
-    elif (j not in trigger_aircraft_ids and i not in trigger_aircraft_ids) or (j in trigger_aircraft_ids and i in trigger_aircraft_ids):
+    if trigger_aircraft not in trigger_aircraft_ids and health_aircraft in trigger_aircraft_ids:
+        trigger_aircraft, health_aircraft, = health_aircraft, trigger_aircraft
+    elif ((health_aircraft not in trigger_aircraft_ids and trigger_aircraft not in trigger_aircraft_ids)
+          or (health_aircraft in trigger_aircraft_ids and trigger_aircraft in trigger_aircraft_ids)):
         return nearest_flights
-    j_flights_frame = aircraft_flight_line(j, nearest_flights)
+    print(trigger_aircraft, health_aircraft)
+
+    trigger_timerange = extract_trigger_time_range(trigger_aircraft, trigger_flight_id, partition_list)
+    trigger_part = extract_part_using_flight_id(trigger_aircraft, trigger_flight_id, partition_list)
+    print('trigger_part: ', trigger_part)
+    health_part = extract_part_from_timerange(health_aircraft, nearest_flights, trigger_timerange, partition_list)
+    print('health_part: ', health_part)
+    print('partition_list: ', partition_list)
+    for part in partition_list:
+        if part == trigger_part:
+            for flight in part:
+                flight['aircraft_id'] = health_aircraft
+        if part == health_part:
+            for flight in part:
+                flight['aircraft_id'] = trigger_aircraft
+    print('NEW partition_list: ', partition_list)
+
+
+def disrupted_flights_for_aircraft_id(aircraft_id: int,
+                                      equipment_disrupted_list: list,
+                                      flight_shift_disrupted_list: list) -> list:
+    """Из двух списков проблемных рейсов получаем список рейсов для конкретного ВС"""
+    all_disrupted_flights = equipment_disrupted_list + flight_shift_disrupted_list
+    disrupted_flights_for_aircraft_id_list = []
+    for flight in all_disrupted_flights:
+        if flight['aircraft_id'] == aircraft_id:
+            disrupted_flights_for_aircraft_id_list.append(flight)
+    return disrupted_flights_for_aircraft_id_list
 
 
 def flights_objective_function(flights_parts: list, nearest_schedule: pd.DataFrame):
@@ -252,11 +286,10 @@ nearest_sched = nearest_flights_selection(previous_solution, curr_time, 'KJA', '
 # nearest_sched.to_csv('csv_files/nearest_schedule.csv', index=False, sep=';')
 parts = base_airports_partition(nearest_sched, 'KJA', 'LED')
 b = generate_airport_pairs(nearest_sched)
-print(b)
-# print(parts)
-# print(equipment_disrupted_flights(flight_equipments, nearest_sched, problematic_aircraft_equipment, curr_time, 0, 1, 2, 3, 4))
-# print(flights_objective_function(parts, nearest_sched))
-# aircraft_fl = aircraft_flight_line(5, nearest_sched)
-# a = extract_trigger_time_range('FV6721', aircraft_fl, parts)
-# print(a)
-# print(extract_part_from_timerange(1, nearest_sched, a, parts))
+equipment_disrupted_list = equipment_disrupted_flights(flight_equipments, nearest_sched, problematic_aircraft_equipment, curr_time, 0, 1, 2)
+flight_shift_disrupted_list = flight_shift_disrupted_flights(previous_solution, problematic_flight_shift, 0, 1, 2)
+disrupted_flights = disrupted_flights_for_aircraft_id(3, equipment_disrupted_list, flight_shift_disrupted_list)
+trigger_aircraft_list = (extract_trigger_aircraft_ids(problematic_aircraft_equipment) +
+                         extract_trigger_aircraft_ids(problematic_flight_shift))
+
+print(swap(3, 6, parts, equipment_disrupted_list, flight_shift_disrupted_list, nearest_sched, trigger_aircraft_list, 'FV6516'))
