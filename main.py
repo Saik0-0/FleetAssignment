@@ -27,6 +27,7 @@ problematic_flight_shift = pd.read_csv('csv_files/df_problematic_flight_shift.cs
 def nearest_flights_selection(previous_solution_table: pd.DataFrame,
                               current_time: datetime,
                               *base_airports: str) -> pd.DataFrame:
+    """Возвращает часть расписания (указанная дата + 3 суток)"""
     previous_solution_table_result = pd.DataFrame(columns=previous_solution_table.columns)
     for index, flight_row in previous_solution_table.iterrows():
         if current_time <= pd.to_datetime(flight_row['departure_time'], format='%Y-%m-%d %H:%M:%S') <= current_time + timedelta(days=2, hours=23, minutes=59):
@@ -60,6 +61,7 @@ def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
                                 disruptions_table: pd.DataFrame,
                                 current_time: datetime,
                                 *disruption_ids: int) -> list:
+    """Возвращает список полётов, которые становятся невыполнимыми из-за смены оснащения ВС"""
     disruptions_table = disruptions_table.loc[[*disruption_ids]]
     problematic_aircrafts = disruptions_table['aircraft_id'].tolist()
     previous_solution_table = nearest_flights_selection(previous_solution_table, current_time)
@@ -94,7 +96,7 @@ def equipment_disrupted_flights_checker(flight_equipments_table: pd.DataFrame,
                                         disruptions_table: pd.DataFrame,
                                         current_time: datetime,
                                         *disruption_ids: int) -> bool:
-    """Возвращает True если расписание остается верным(не ломается, иначе False"""
+    """Возвращает True если расписание остается верным(не ломается от смены оснащения ВС, иначе False)"""
     if len(equipment_disrupted_flights(flight_equipments_table,
                                        previous_solution_table,
                                        disruptions_table,
@@ -105,6 +107,7 @@ def equipment_disrupted_flights_checker(flight_equipments_table: pd.DataFrame,
 
 
 def get_time_from_table(table: pd.DataFrame, previous_solution_id: int, column_name: str) -> datetime:
+    """Возвращает объект datetime из таблицы для необходимой строки для departure/arrival(передаётся в column_name)"""
     if 'new' not in column_name:
         previous_solution_id += 1
     string_time = table[table['previous_solution_id'] == previous_solution_id][column_name].iloc[0]
@@ -116,7 +119,8 @@ def get_time_from_table(table: pd.DataFrame, previous_solution_id: int, column_n
 def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
                                    disruptions_table: pd.DataFrame,
                                    *disruption_ids: int) -> list:
-    """Надо проверять остается ли окно в 50 мин до след рейса"""
+    """Возвращает список полётов, которые становятся невыполнимыми из-за переноса рейсов
+    (в т.ч. проверка на +50 минут после рейса"""
     problematic_aircrafts = disruptions_table['aircraft_id'].tolist()
     disrupted_flights = []
 
@@ -143,13 +147,14 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
 def flight_shift_disrupted_flights_checker(previous_solution_table: pd.DataFrame,
                                            disruptions_table: pd.DataFrame,
                                            *disruption_ids: int) -> bool:
+    """Возвращает True если расписание остается верным(не ломается от переноса рейсов, иначе False)"""
     if len(flight_shift_disrupted_flights(previous_solution_table, disruptions_table, *disruption_ids)) > 0:
         return False
     return True
 
 
 def generate_airport_pairs(previous_solution_table: pd.DataFrame) -> dict:
-    """Возвращает список кортежей, в которых хранятся previous_solution_id для соединенных рейсов"""
+    """Возвращает словарь, который для каждого ВС хранит данные о каждом рейсе(во вложенных словарях)"""
     departure_time_row = pd.to_datetime(previous_solution_table['departure_time'])
     arrival_time_row = pd.to_datetime(previous_solution_table['arrival_time'])
     departure_airport_row = previous_solution_table['departure_airport_code']
@@ -174,9 +179,8 @@ def generate_airport_pairs(previous_solution_table: pd.DataFrame) -> dict:
 
 
 def base_airports_partition(previous_solution_table: pd.DataFrame, *base_airports: str) -> list:
-    """LED, KJA. Отдельно обработать полеты из базы в базу"""
+    """Возвращает список связок полётов, разделенных по базовым аэропортам(LED, KJA)"""
     airport_pairs_list = generate_airport_pairs(previous_solution_table)
-
     partition_list = []
     for aircraft_id in airport_pairs_list.keys():
         current_part = []
@@ -212,16 +216,17 @@ def extract_part_using_flight_id(flight_id: str, airports_partition: list) -> li
     return trigger_part
 
 
-def extract_part_from_timerange(aircraft_id: int, nearest_schedule: pd.DataFrame, timerange: list, airport_partition: list) -> pd.Series:
+def extract_part_from_timerange(aircraft_id: int, nearest_schedule: pd.DataFrame, timerange: list, airport_partition: list) -> list:
+    """Возвращает связку, один из полётов который попадает в указанный временной отрезок"""
     aircraft_flights = aircraft_flight_line(aircraft_id, nearest_schedule)
     for index, flight in aircraft_flights.iterrows():
         if ((pd.to_datetime(flight['departure_time']) >= timerange[0] and pd.to_datetime(flight['arrival_time']) <= timerange[1])
                 or (pd.to_datetime(flight['departure_time']) <= timerange[1] <= pd.to_datetime(flight['arrival_time']))
                 or (pd.to_datetime(flight['departure_time']) <= timerange[0] <= pd.to_datetime(flight['arrival_time']))):
-            print(extract_part_using_flight_id(flight['flight_id'], airport_partition))
+            return extract_part_using_flight_id(flight['flight_id'], airport_partition)
 
 
-def extract_trigger_time_range(trigger_flight_id: str, aircraft_flights: pd.DataFrame, airports_partition: list) -> list:
+def extract_trigger_time_range(trigger_flight_id: str, airports_partition: list) -> list:
     """Возвращает временной отрезок, в котором находится связка с триггерным рейсом"""
     trigger_part = extract_part_using_flight_id(trigger_flight_id, airports_partition)
     trigger_departure_time = trigger_part[0]['departure_time']
@@ -246,10 +251,12 @@ curr_time = datetime(2025, 1, 22, 0, 0)
 nearest_sched = nearest_flights_selection(previous_solution, curr_time, 'KJA', 'LED')
 # nearest_sched.to_csv('csv_files/nearest_schedule.csv', index=False, sep=';')
 parts = base_airports_partition(nearest_sched, 'KJA', 'LED')
+b = generate_airport_pairs(nearest_sched)
+print(b)
 # print(parts)
 # print(equipment_disrupted_flights(flight_equipments, nearest_sched, problematic_aircraft_equipment, curr_time, 0, 1, 2, 3, 4))
 # print(flights_objective_function(parts, nearest_sched))
-aircraft_fl = aircraft_flight_line(5, nearest_sched)
-a = extract_trigger_time_range('FV6721', aircraft_fl, parts)
-print(a)
-print(extract_part_from_timerange(1, nearest_sched, a, parts))
+# aircraft_fl = aircraft_flight_line(5, nearest_sched)
+# a = extract_trigger_time_range('FV6721', aircraft_fl, parts)
+# print(a)
+# print(extract_part_from_timerange(1, nearest_sched, a, parts))
