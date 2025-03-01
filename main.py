@@ -1,3 +1,5 @@
+from itertools import chain
+
 import pandas as pd
 from ast import literal_eval
 from datetime import datetime, timedelta
@@ -233,6 +235,12 @@ def extract_trigger_time_range(aircraft_id: int, trigger_flight_id: str, airport
     return [trigger_departure_time, trigger_arrival_time]
 
 
+def from_partition_to_dataframe(partition_list: list) -> pd.DataFrame:
+    temp_list = list(chain(*partition_list))
+    new_schedule = pd.DataFrame(temp_list)
+    return new_schedule
+
+
 def swap(trigger_aircraft: int,
          health_aircraft: int,
          partition_list: list,
@@ -240,21 +248,18 @@ def swap(trigger_aircraft: int,
          flight_shift_disrupted_list: list,
          nearest_flights: pd.DataFrame,
          trigger_aircraft_ids: list,
-         trigger_flight_id: str):
+         trigger_flight_id: str) -> pd.DataFrame:
     """Делаем swap между ВС по связкам"""
     if trigger_aircraft not in trigger_aircraft_ids and health_aircraft in trigger_aircraft_ids:
         trigger_aircraft, health_aircraft, = health_aircraft, trigger_aircraft
     elif ((health_aircraft not in trigger_aircraft_ids and trigger_aircraft not in trigger_aircraft_ids)
           or (health_aircraft in trigger_aircraft_ids and trigger_aircraft in trigger_aircraft_ids)):
         return nearest_flights
-    print(trigger_aircraft, health_aircraft)
 
     trigger_timerange = extract_trigger_time_range(trigger_aircraft, trigger_flight_id, partition_list)
     trigger_part = extract_part_using_flight_id(trigger_aircraft, trigger_flight_id, partition_list)
-    print('trigger_part: ', trigger_part)
     health_part = extract_part_from_timerange(health_aircraft, nearest_flights, trigger_timerange, partition_list)
-    print('health_part: ', health_part)
-    print('partition_list: ', partition_list)
+
     for part in partition_list:
         if part == trigger_part:
             for flight in part:
@@ -262,7 +267,9 @@ def swap(trigger_aircraft: int,
         if part == health_part:
             for flight in part:
                 flight['aircraft_id'] = trigger_aircraft
-    print('NEW partition_list: ', partition_list)
+
+    new_schedule = from_partition_to_dataframe(partition_list)
+    return new_schedule
 
 
 def disrupted_flights_for_aircraft_id(aircraft_id: int,
@@ -292,4 +299,6 @@ disrupted_flights = disrupted_flights_for_aircraft_id(3, equipment_disrupted_lis
 trigger_aircraft_list = (extract_trigger_aircraft_ids(problematic_aircraft_equipment) +
                          extract_trigger_aircraft_ids(problematic_flight_shift))
 
-print(swap(3, 6, parts, equipment_disrupted_list, flight_shift_disrupted_list, nearest_sched, trigger_aircraft_list, 'FV6516'))
+new_partition = swap(3, 6, parts, equipment_disrupted_list, flight_shift_disrupted_list, nearest_sched, trigger_aircraft_list, 'FV6516')
+new_schedule_dataframe = from_partition_to_dataframe(new_partition)
+new_schedule_dataframe.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
