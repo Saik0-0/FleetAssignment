@@ -9,6 +9,14 @@ from dateutil import parser
 Добавить проверку что переданные в equipment_disrupted_flights() индексы есть в df_problematic_aircraft_equipment.csv
 '''
 
+
+# def to_datatime(schedule: pd.DataFrame) -> pd.DataFrame:
+#     schedule['departure_time'] = pd.to_datetime(schedule['departure_time'])
+#     schedule['arrival_time'] = pd.to_datetime(schedule['arrival_time'])
+#     return schedule
+
+
+pd.set_option("display.max_columns", None)
 # парк доступных вс
 fleet = pd.read_csv('csv_files/df_aircraft.csv', sep=';')
 # авиарейсы
@@ -113,8 +121,11 @@ def get_time_from_table(table: pd.DataFrame, previous_solution_id: int, column_n
     if 'new' not in column_name:
         previous_solution_id += 1
     string_time = table[table['previous_solution_id'] == previous_solution_id][column_name].iloc[0]
-
-    time_object = parser.parse(string_time, dayfirst=True)
+    # print(string_time, type(string_time))
+    if type(string_time) == str:
+        time_object = parser.parse(string_time, dayfirst=True)
+    else:
+        return string_time
     return time_object
 
 
@@ -160,6 +171,7 @@ def generate_airport_pairs(previous_solution_table: pd.DataFrame) -> dict:
     arrival_time_row = pd.to_datetime(previous_solution_table['arrival_time'])
     departure_airport_row = previous_solution_table['departure_airport_code']
     arrival_airport_row = previous_solution_table['arrival_airport_code']
+    aircraft_type_row = previous_solution_table['aircraft_type']
     flight_id_row = previous_solution_table['flight_id']
     previous_solution_id_row = previous_solution_table['previous_solution_id']
 
@@ -169,10 +181,11 @@ def generate_airport_pairs(previous_solution_table: pd.DataFrame) -> dict:
     for i in range(len(previous_solution_table)):
         flight_dict = {'departure_time': departure_time_row.iloc[i],
                        'arrival_time': arrival_time_row.iloc[i],
-                       'departure_airport': departure_airport_row.iloc[i],
-                       'arrival_airport': arrival_airport_row.iloc[i],
                        'flight_id': str(flight_id_row.iloc[i]),
-                       'aircraft_id': str(aircraft_id_row.iloc[i]),
+                       'departure_airport_code': departure_airport_row.iloc[i],
+                       'arrival_airport_code': arrival_airport_row.iloc[i],
+                       'aircraft_type': aircraft_type_row.iloc[i],
+                       'aircraft_id': int(aircraft_id_row.iloc[i]),
                        'previous_solution_id': int(previous_solution_id_row.iloc[i])}
         airport_pairs_list[str(aircraft_id_row.iloc[i])].append(flight_dict)
 
@@ -187,7 +200,7 @@ def base_airports_partition(previous_solution_table: pd.DataFrame, *base_airport
         current_part = []
         for flight in airport_pairs_list[aircraft_id]:
             current_part.append(flight)
-            if flight['arrival_airport'] in base_airports:
+            if flight['arrival_airport_code'] in base_airports:
                 partition_list.append(current_part)
                 current_part = []
         if current_part:
@@ -212,7 +225,7 @@ def extract_part_using_flight_id(aircraft_id: int, flight_id: str, airports_part
     trigger_part = []
     for part in airports_partition:
         for flight in part:
-            if flight_id == flight['flight_id'] and str(aircraft_id) == flight['aircraft_id']:
+            if flight_id == flight['flight_id'] and aircraft_id == flight['aircraft_id']:
                 trigger_part = part
     return trigger_part
 
@@ -236,8 +249,12 @@ def extract_trigger_time_range(aircraft_id: int, trigger_flight_id: str, airport
 
 
 def from_partition_to_dataframe(partition_list: list) -> pd.DataFrame:
+    """Из списка связок получаем расписание в DataFrame"""
     temp_list = list(chain(*partition_list))
     new_schedule = pd.DataFrame(temp_list)
+    new_schedule['departure_time'] = new_schedule['departure_time'].astype(str)
+    new_schedule['arrival_time'] = new_schedule['arrival_time'].astype(str)
+
     return new_schedule
 
 
@@ -284,8 +301,10 @@ def disrupted_flights_for_aircraft_id(aircraft_id: int,
     return disrupted_flights_for_aircraft_id_list
 
 
-def flights_objective_function(flights_parts: list, nearest_schedule: pd.DataFrame):
+def schedule_differences(previous_schedule: pd.DataFrame, new_schedule: pd.DataFrame) -> int:
     """Кол-во переставленных связок(рейсов) и суммарное время сдвинутых ТО(не дольше суток) -> min"""
+    diff = (previous_schedule != new_schedule).any(axis=1).sum()
+    print(diff)
 
 
 curr_time = datetime(2025, 1, 22, 0, 0)
@@ -300,5 +319,9 @@ trigger_aircraft_list = (extract_trigger_aircraft_ids(problematic_aircraft_equip
                          extract_trigger_aircraft_ids(problematic_flight_shift))
 
 new_partition = swap(3, 6, parts, equipment_disrupted_list, flight_shift_disrupted_list, nearest_sched, trigger_aircraft_list, 'FV6516')
-new_schedule_dataframe = from_partition_to_dataframe(new_partition)
-new_schedule_dataframe.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
+# new_schedule_dataframe = from_partition_to_dataframe(new_partition)
+# new_partition.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
+
+print(schedule_differences(nearest_sched, new_partition))
+# print("Columns in previous_schedule:", nearest_sched.columns)
+# print("Columns in new_schedule:", new_partition.columns)
