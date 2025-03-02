@@ -216,7 +216,7 @@ def extract_trigger_aircraft_ids(disruption_table: pd.DataFrame) -> list:
 
 def aircraft_flight_line(aircraft_id: int, nearest_schedule: pd.DataFrame) -> pd.DataFrame:
     """Возвращает DataFrame полетов для конкретного ВС"""
-    aircraft_flights = nearest_schedule[nearest_schedule['aircraft_id'] == aircraft_id]
+    aircraft_flights = nearest_schedule[nearest_schedule['aircraft_id'] == aircraft_id].reset_index(drop=True)
     return aircraft_flights
 
 
@@ -258,6 +258,18 @@ def from_partition_to_dataframe(partition_list: list) -> pd.DataFrame:
     return new_schedule
 
 
+def schedule_time_checker(aircraft_id: int, new_schedule: pd.DataFrame) -> bool:
+    aircraft_flights = aircraft_flight_line(aircraft_id, new_schedule)
+    flag = True
+    for index in range(len(aircraft_flights) - 1):
+        arrival_time = aircraft_flights['arrival_time'].iloc[index]
+        next_departure_time = aircraft_flights['departure_time'].iloc[index + 1]
+        print(f'{arrival_time}, {next_departure_time}')
+        if (pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds() < 3000:
+            flag = False
+    return flag
+
+
 def swap(trigger_aircraft: int,
          health_aircraft: int,
          partition_list: list,
@@ -286,6 +298,7 @@ def swap(trigger_aircraft: int,
                 flight['aircraft_id'] = trigger_aircraft
 
     new_schedule = from_partition_to_dataframe(partition_list)
+    new_schedule = new_schedule.sort_values(by=['aircraft_id', 'departure_time'])
     return new_schedule
 
 
@@ -320,8 +333,10 @@ trigger_aircraft_list = (extract_trigger_aircraft_ids(problematic_aircraft_equip
 
 new_partition = swap(3, 6, parts, equipment_disrupted_list, flight_shift_disrupted_list, nearest_sched, trigger_aircraft_list, 'FV6516')
 # new_schedule_dataframe = from_partition_to_dataframe(new_partition)
-# new_partition.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
+new_partition.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
 
-print(schedule_differences(nearest_sched, new_partition))
+# print(schedule_differences(nearest_sched, new_partition))
 # print("Columns in previous_schedule:", nearest_sched.columns)
 # print("Columns in new_schedule:", new_partition.columns)
+print(schedule_time_checker(3, new_partition))
+
