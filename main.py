@@ -259,13 +259,25 @@ def from_partition_to_dataframe(partition_list: list) -> pd.DataFrame:
 
 
 def schedule_time_checker(aircraft_id: int, new_schedule: pd.DataFrame) -> bool:
+    """Проверяет, не накладываются ли по времени рейсы в новом расписании"""
     aircraft_flights = aircraft_flight_line(aircraft_id, new_schedule)
     flag = True
     for index in range(len(aircraft_flights) - 1):
         arrival_time = aircraft_flights['arrival_time'].iloc[index]
         next_departure_time = aircraft_flights['departure_time'].iloc[index + 1]
-        print(f'{arrival_time}, {next_departure_time}')
         if (pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds() < 3000:
+            flag = False
+    return flag
+
+
+def airports_checker(aircraft_id: int, new_schedule: pd.DataFrame) -> bool:
+    """Проверяет не накладываются ли рейсы по нахождению в разных аэропортах"""
+    aircraft_flight = aircraft_flight_line(aircraft_id, new_schedule)
+    flag = True
+    for index in range(len(aircraft_flight) - 1):
+        arrival_airport = aircraft_flight['arrival_airport_code'].iloc[index]
+        next_departure_airport = aircraft_flight['departure_airport_code'].iloc[index + 1]
+        if arrival_airport != next_departure_airport:
             flag = False
     return flag
 
@@ -333,10 +345,10 @@ trigger_aircraft_list = (extract_trigger_aircraft_ids(problematic_aircraft_equip
 
 new_partition = swap(3, 6, parts, equipment_disrupted_list, flight_shift_disrupted_list, nearest_sched, trigger_aircraft_list, 'FV6516')
 # new_schedule_dataframe = from_partition_to_dataframe(new_partition)
-new_partition.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
+# new_partition.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
 
 # print(schedule_differences(nearest_sched, new_partition))
 # print("Columns in previous_schedule:", nearest_sched.columns)
 # print("Columns in new_schedule:", new_partition.columns)
-print(schedule_time_checker(3, new_partition))
+print(airports_checker(6, new_partition))
 
