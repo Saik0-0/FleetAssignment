@@ -259,43 +259,48 @@ def from_partition_to_dataframe(partition_list: list) -> pd.DataFrame:
     return new_schedule
 
 
-def schedule_time_checker(aircraft_id: int, new_schedule: pd.DataFrame) -> bool:
+def schedule_time_checker(new_schedule: pd.DataFrame) -> bool:
     """Проверяет, не накладываются ли по времени рейсы в новом расписании"""
-    aircraft_flights = aircraft_flight_line(aircraft_id, new_schedule)
+    aircraft_ids = new_schedule['aircraft_id'].unique().tolist()
     flag = True
-    for index in range(len(aircraft_flights) - 1):
-        arrival_time = aircraft_flights['arrival_time'].iloc[index]
-        next_departure_time = aircraft_flights['departure_time'].iloc[index + 1]
-        if (pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds() < 3000:
-            flag = False
+    for aircraft_id in aircraft_ids:
+        aircraft_flights = aircraft_flight_line(aircraft_id, new_schedule)
+        for index in range(len(aircraft_flights) - 1):
+            arrival_time = aircraft_flights['arrival_time'].iloc[index]
+            next_departure_time = aircraft_flights['departure_time'].iloc[index + 1]
+            if (pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds() < 3000:
+                flag = False
     return flag
 
 
-def airports_checker(aircraft_id: int, new_schedule: pd.DataFrame) -> bool:
+def airports_checker(new_schedule: pd.DataFrame) -> bool:
     """Проверяет не накладываются ли рейсы по нахождению в разных аэропортах"""
-    aircraft_flight = aircraft_flight_line(aircraft_id, new_schedule)
+    aircraft_ids = new_schedule['aircraft_id'].unique().tolist()
     flag = True
-    for index in range(len(aircraft_flight) - 1):
-        arrival_airport = aircraft_flight['arrival_airport_code'].iloc[index]
-        next_departure_airport = aircraft_flight['departure_airport_code'].iloc[index + 1]
-        if arrival_airport != next_departure_airport:
-            flag = False
+    for aircraft_id in aircraft_ids:
+        aircraft_flight = aircraft_flight_line(aircraft_id, new_schedule)
+        for index in range(len(aircraft_flight) - 1):
+            arrival_airport = aircraft_flight['arrival_airport_code'].iloc[index]
+            next_departure_airport = aircraft_flight['departure_airport_code'].iloc[index + 1]
+            if arrival_airport != next_departure_airport:
+                flag = False
     return flag
 
 
-def equipment_checker(aircraft_id: int,
-                      new_schedule: pd.DataFrame,
+def equipment_checker(new_schedule: pd.DataFrame,
                       flight_equipment_table: pd.DataFrame,
                       aircraft_equipment_table: pd.DataFrame) -> bool:
     """Проверяет, подходит ли оснащение самолёта для его рейсов"""
-    aircraft_equipment = aircraft_equipment_table[aircraft_equipment_table['aircraft_id'] == aircraft_id]['equipment_id'].iloc[0]
     flag = True
-    aircraft_flights = aircraft_flight_line(aircraft_id, new_schedule)
-    for index, flight_id in aircraft_flights['flight_id'].items():
-        flight_equipment = flight_equipment_table[flight_equipment_table['flight_id'] == flight_id]['equipment_ids'].iloc[0]
-        flight_equipment = list(ast.literal_eval(flight_equipment))
-        if aircraft_equipment not in flight_equipment:
-            flag = False
+    aircraft_ids = aircraft_equipment_table['aircraft_id'].tolist()
+    for aircraft_id in aircraft_ids:
+        aircraft_equipment = aircraft_equipment_table[aircraft_equipment_table['aircraft_id'] == aircraft_id]['equipment_id'].iloc[0]
+        aircraft_flights = aircraft_flight_line(aircraft_id, new_schedule)
+        for index, flight_id in aircraft_flights['flight_id'].items():
+            flight_equipment = flight_equipment_table[flight_equipment_table['flight_id'] == flight_id]['equipment_ids'].iloc[0]
+            flight_equipment = list(ast.literal_eval(flight_equipment))
+            if aircraft_equipment not in flight_equipment:
+                flag = False
     return flag
 
 
@@ -349,10 +354,15 @@ def schedule_differences(previous_schedule: pd.DataFrame, new_schedule: pd.DataF
     print(diff)
 
 
-def penalty_function(aircraft_id: int, new_schedule: pd.DataFrame) -> int:
+def penalty_function(new_schedule: pd.DataFrame,
+                     flight_equipment_table: pd.DataFrame,
+                     aircraft_equipment_table: pd.DataFrame) -> int:
     penalty = 1000
-    if not (schedule_time_checker(aircraft_id, new_schedule) and airports_checker(aircraft_id, new_schedule)):
+    if not (schedule_time_checker(new_schedule)
+            and airports_checker(new_schedule)
+            and equipment_checker(new_schedule, flight_equipment_table, aircraft_equipment_table)):
         return penalty
+    return 0
 
 
 curr_time = datetime(2025, 1, 22, 0, 0)
@@ -374,4 +384,4 @@ new_partition = swap(3, 6, parts, equipment_disrupted_list, flight_shift_disrupt
 # print("Columns in previous_schedule:", nearest_sched.columns)
 # print("Columns in new_schedule:", new_partition.columns)
 # print(airports_checker(6, new_partition))
-print(equipment_checker(6, new_partition, flight_equipments, fleet))
+print(penalty_function(nearest_sched, flight_equipments, fleet))
