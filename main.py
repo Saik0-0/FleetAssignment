@@ -1,3 +1,4 @@
+import ast
 from itertools import chain
 
 import pandas as pd
@@ -282,6 +283,22 @@ def airports_checker(aircraft_id: int, new_schedule: pd.DataFrame) -> bool:
     return flag
 
 
+def equipment_checker(aircraft_id: int,
+                      new_schedule: pd.DataFrame,
+                      flight_equipment_table: pd.DataFrame,
+                      aircraft_equipment_table: pd.DataFrame) -> bool:
+    """Проверяет, подходит ли оснащение самолёта для его рейсов"""
+    aircraft_equipment = aircraft_equipment_table[aircraft_equipment_table['aircraft_id'] == aircraft_id]['equipment_id'].iloc[0]
+    flag = True
+    aircraft_flights = aircraft_flight_line(aircraft_id, new_schedule)
+    for index, flight_id in aircraft_flights['flight_id'].items():
+        flight_equipment = flight_equipment_table[flight_equipment_table['flight_id'] == flight_id]['equipment_ids'].iloc[0]
+        flight_equipment = list(ast.literal_eval(flight_equipment))
+        if aircraft_equipment not in flight_equipment:
+            flag = False
+    return flag
+
+
 def swap(trigger_aircraft: int,
          health_aircraft: int,
          partition_list: list,
@@ -332,6 +349,12 @@ def schedule_differences(previous_schedule: pd.DataFrame, new_schedule: pd.DataF
     print(diff)
 
 
+def penalty_function(aircraft_id: int, new_schedule: pd.DataFrame) -> int:
+    penalty = 1000
+    if not (schedule_time_checker(aircraft_id, new_schedule) and airports_checker(aircraft_id, new_schedule)):
+        return penalty
+
+
 curr_time = datetime(2025, 1, 22, 0, 0)
 nearest_sched = nearest_flights_selection(previous_solution, curr_time, 'KJA', 'LED')
 # nearest_sched.to_csv('csv_files/nearest_schedule.csv', index=False, sep=';')
@@ -350,5 +373,5 @@ new_partition = swap(3, 6, parts, equipment_disrupted_list, flight_shift_disrupt
 # print(schedule_differences(nearest_sched, new_partition))
 # print("Columns in previous_schedule:", nearest_sched.columns)
 # print("Columns in new_schedule:", new_partition.columns)
-print(airports_checker(6, new_partition))
-
+# print(airports_checker(6, new_partition))
+print(equipment_checker(6, new_partition, flight_equipments, fleet))
