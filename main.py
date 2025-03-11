@@ -306,7 +306,7 @@ def get_time_diapason_for_aircraft(aircraft_id: int, schedule: pd.DataFrame) -> 
     return {'min_time': min_time, 'max_time': max_time}
 
 
-def remake_technical_service_table(technical_service_table: pd.DataFrame, schedule: pd.DataFrame, current_time: datetime) -> pd.DataFrame:
+def remake_technical_service_table(technical_service_table: pd.DataFrame, schedule: pd.DataFrame) -> pd.DataFrame:
     """Извлекает из таблицы тех обслуживания строки, попадающие в нужный диапазон времени"""
     technical_service_table_copy = pd.DataFrame(columns=technical_service_table.columns)
     prev_aircraft_id = technical_service_table['aircraft_id'].iloc[0]
@@ -315,14 +315,27 @@ def remake_technical_service_table(technical_service_table: pd.DataFrame, schedu
         aircraft_id = row['aircraft_id']
         if aircraft_id != prev_aircraft_id:
             time_diapason = get_time_diapason_for_aircraft(aircraft_id, schedule)
-        if pd.to_datetime(row['time_finish'], dayfirst=True) <= time_diapason['max_time'] and pd.to_datetime(row['time_start'], dayfirst=True) >= time_diapason['min_time']:
+        if (pd.to_datetime(row['time_finish'], dayfirst=True) <= time_diapason['max_time']
+                and pd.to_datetime(row['time_start'], dayfirst=True) >= time_diapason['min_time']):
             technical_service_table_copy.loc[len(technical_service_table_copy.index)] = row
     return technical_service_table_copy
 
 
-def technical_service_checker(new_schedule: pd.DataFrame,
-                              technical_service_table: pd.DataFrame,
-                              current_time: datetime) -> bool:
+def checking_time_differences(aircraft_flights: pd.DataFrame, time_size: timedelta):
+    """Проверяет, есть ли необходимый диапазон времени в перерывах между переданными рейсами конкретного ВС"""
+    flag = False
+    for index in range(len(aircraft_flights.index) - 1):
+        arrival_time = pd.to_datetime(aircraft_flights['arrival_time']).iloc[index]
+        next_departure_time = pd.to_datetime(aircraft_flights['departure_time']).iloc[index + 1]
+        time_delta = next_departure_time - arrival_time
+        if time_delta >= time_size:
+            flag = True
+    return flag
+
+
+def technical_service_checker(new_schedule: pd.DataFrame, technical_service_table: pd.DataFrame) -> bool:
+    """Добавить проверку, что не только есть свободный time gap, но и в нужный день и время"""
+    technical_service_table = remake_technical_service_table(technical_service_table, new_schedule)
     technical_service_aircraft_ids = technical_service_table['aircraft_id'].unique().tolist()
     flag = True
     for aircraft_id in technical_service_aircraft_ids:
@@ -330,12 +343,11 @@ def technical_service_checker(new_schedule: pd.DataFrame,
         aircraft_ts = technical_service_table[technical_service_table['aircraft_id'] == aircraft_id]
         technical_service_ids = aircraft_ts['technical_service_id'].unique().tolist()
         for technical_service_id in technical_service_ids:
-            ts_rows = aircraft_ts[aircraft_ts['technical_service_id'] == technical_service_id]
-            flag_list = [True for _ in range(len(ts_rows))]
-            for index, row in ts_rows.iterrows():
-                ...
-                # идея: брать time_size, проходится по временным разрывам между связками и смотреть что можно найти разрыв = time_size
-
+            time_size = aircraft_ts[aircraft_ts['technical_service_id'] == technical_service_id]['time_size'].iloc[0]
+            time_size = pd.to_timedelta(time_size)
+            if not checking_time_differences(aircraft_flights, time_size):
+                flag = False
+    return flag
 
 
 def swap(trigger_aircraft: int,
@@ -417,6 +429,7 @@ new_partition = swap(3, 6, parts, nearest_sched, trigger_aircraft_list, 'FV6516'
 # print("Columns in new_schedule:", new_partition.columns)
 # print(airports_checker(6, new_partition))
 # print(penalty_function(nearest_sched, flight_equipments, aircraft))
-# print(technical_service_checker(new_partition, technical_service, curr_time))
+print(technical_service_checker(new_partition, technical_service))
 # print(get_time_diapason_for_aircraft(1, new_partition))
-print(remake_technical_service_table(technical_service, new_partition, curr_time))
+# print(remake_technical_service_table(technical_service, new_partition, curr_time))
+# print(checking_time_differences(aircraft_flight_line(1, new_partition), pd.to_timedelta("0 days 10:00:00")))
