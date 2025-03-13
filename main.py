@@ -28,8 +28,6 @@ problematic_aircraft_equipment = pd.read_csv('csv_files/df_problematic_aircraft_
 # disruption: перенос рейсов
 problematic_flight_shift = pd.read_csv('csv_files/df_problematic_flight_shift.csv', sep=';')
 
-DIFF = 0
-
 
 def nearest_flights_selection(previous_solution_table: pd.DataFrame,
                               current_time: datetime,
@@ -395,16 +393,13 @@ def swap(trigger_aircraft: int,
     trigger_part = extract_part_using_flight_id(trigger_aircraft, trigger_flight_id, partition_list)
     health_part = extract_part_from_timerange(health_aircraft, nearest_flights, trigger_timerange, partition_list)
 
-    global DIFF
     for part in partition_list:
         if part == trigger_part:
             for flight in part:
                 flight['aircraft_id'] = health_aircraft
-                DIFF += 1
         if part == health_part:
             for flight in part:
                 flight['aircraft_id'] = trigger_aircraft
-                DIFF += 1
 
     new_schedule = from_partition_to_dataframe(partition_list)
     new_schedule = new_schedule.sort_values(by=['aircraft_id', 'departure_time']).reset_index(drop=True)
@@ -425,8 +420,16 @@ def disrupted_flights_for_aircraft_id(aircraft_id: int,
 
 def schedule_differences(previous_schedule: pd.DataFrame, new_schedule: pd.DataFrame) -> int:
     """Кол-во переставленных рейсов -> min"""
-    global DIFF
-    return DIFF
+    prev_flights = []
+    new_flights = []
+    diff = 0
+    for index in range(len(previous_schedule)):
+        prev_flights.append((previous_schedule['aircraft_id'].iloc[index], previous_schedule['previous_solution_id'].iloc[index]))
+        new_flights.append((new_schedule['aircraft_id'].iloc[index], new_schedule['previous_solution_id'].iloc[index]))
+    for pair in prev_flights:
+        if pair not in new_flights:
+            diff += 1
+    return diff
 
 
 def penalty_function(new_schedule: pd.DataFrame,
@@ -436,9 +439,18 @@ def penalty_function(new_schedule: pd.DataFrame,
     if not (schedule_time_checker(new_schedule)
             and airports_checker(new_schedule)
             and equipment_checker(new_schedule, flight_equipment_table, aircraft_equipment_table)):
-        print(schedule_time_checker(new_schedule))
         return penalty
     return 0
+
+
+def objective_function(previous_schedule: pd.DataFrame,
+                       new_schedule: pd.DataFrame,
+                       flight_equipment_table: pd.DataFrame,
+                       aircraft_equipment_table: pd.DataFrame,
+                       technical_service_table: pd.DataFrame) -> int:
+    return (schedule_differences(previous_schedule, new_schedule)
+            + ts_time_shifts(new_schedule, technical_service_table)
+            + penalty_function(new_schedule, flight_equipment_table, aircraft_equipment_table))
 
 
 curr_time = datetime(2025, 1, 22, 0, 0)
@@ -455,6 +467,7 @@ trigger_aircraft_list = (extract_trigger_aircraft_ids(problematic_aircraft_equip
                          extract_trigger_aircraft_ids(problematic_flight_shift))
 
 new_partition = swap(3, 13, parts, nearest_sched, trigger_aircraft_list, 'FV6516')
+
 print(ts_time_shifts(new_partition, technical_service) + schedule_differences(nearest_sched, new_partition) + penalty_function(new_partition, flight_equipments, aircraft))
 # new_partition.to_csv('csv_files/new_schedule_RIGHT_TEST.csv', index=False, sep=';')
 
