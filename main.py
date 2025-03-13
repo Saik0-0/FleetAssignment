@@ -28,6 +28,8 @@ problematic_aircraft_equipment = pd.read_csv('csv_files/df_problematic_aircraft_
 # disruption: перенос рейсов
 problematic_flight_shift = pd.read_csv('csv_files/df_problematic_flight_shift.csv', sep=';')
 
+DIFF = 0
+
 
 def nearest_flights_selection(previous_solution_table: pd.DataFrame,
                               current_time: datetime,
@@ -35,8 +37,8 @@ def nearest_flights_selection(previous_solution_table: pd.DataFrame,
     """Возвращает часть расписания (указанная дата + 3 суток)"""
     previous_solution_table_result = pd.DataFrame(columns=previous_solution_table.columns)
     for index, flight_row in previous_solution_table.iterrows():
-        if current_time <= pd.to_datetime(flight_row['departure_time'], format='%Y-%m-%d %H:%M:%S') <= current_time + timedelta(days=2, hours=23, minutes=59):
-            if pd.to_datetime(previous_solution_table.iloc[index + 1]['departure_time']) > current_time + timedelta(days=2, hours=23, minutes=59) and flight_row['arrival_airport_code'] not in base_airports:
+        if current_time <= pd.to_datetime(flight_row['departure_time'], dayfirst=True) <= current_time + timedelta(days=2, hours=23, minutes=59):
+            if pd.to_datetime(previous_solution_table.iloc[index + 1]['departure_time'], dayfirst=True) > current_time + timedelta(days=2, hours=23, minutes=59) and flight_row['arrival_airport_code'] not in base_airports:
                 previous_solution_table_result.loc[len(previous_solution_table_result.index)] = flight_row
                 sub_index = index + 1
                 base_airport_flag = 1
@@ -144,8 +146,8 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
         aircraft_id = problematic_aircrafts[disruption_id]
 
         time_delta = next_departure_time - new_arrival_time
-        # 50 минут = 3000 сек - минимальное окно между рейсами
-        if time_delta.total_seconds() < 3000:
+        # 30 минут = минимальное окно между рейсами
+        if time_delta.total_seconds() < 30 * 60:
             disrupted_flights.append({'flight_id': flight_id, 'aircraft_id': aircraft_id, 'previous_solution_id': int(previous_solution_id)})
 
     return disrupted_flights
@@ -162,8 +164,8 @@ def flight_shift_disrupted_flights_checker(previous_solution_table: pd.DataFrame
 
 def generate_airport_pairs(previous_solution_table: pd.DataFrame) -> dict:
     """Возвращает словарь, который для каждого ВС хранит данные о каждом рейсе(во вложенных словарях)"""
-    departure_time_row = pd.to_datetime(previous_solution_table['departure_time'])
-    arrival_time_row = pd.to_datetime(previous_solution_table['arrival_time'])
+    departure_time_row = pd.to_datetime(previous_solution_table['departure_time'], dayfirst=True)
+    arrival_time_row = pd.to_datetime(previous_solution_table['arrival_time'], dayfirst=True)
     departure_airport_row = previous_solution_table['departure_airport_code']
     arrival_airport_row = previous_solution_table['arrival_airport_code']
     aircraft_type_row = previous_solution_table['aircraft_type']
@@ -229,9 +231,9 @@ def extract_part_from_timerange(aircraft_id: int, nearest_schedule: pd.DataFrame
     """Возвращает связку, один из полётов который попадает в указанный временной отрезок"""
     aircraft_flights = aircraft_flight_line(aircraft_id, nearest_schedule)
     for index, flight in aircraft_flights.iterrows():
-        if ((pd.to_datetime(flight['departure_time']) >= timerange[0] and pd.to_datetime(flight['arrival_time']) <= timerange[1])
-                or (pd.to_datetime(flight['departure_time']) <= timerange[1] <= pd.to_datetime(flight['arrival_time']))
-                or (pd.to_datetime(flight['departure_time']) <= timerange[0] <= pd.to_datetime(flight['arrival_time']))):
+        if ((pd.to_datetime(flight['departure_time'], dayfirst=True) >= timerange[0] and pd.to_datetime(flight['arrival_time'], dayfirst=True) <= timerange[1])
+                or (pd.to_datetime(flight['departure_time'], dayfirst=True) <= timerange[1] <= pd.to_datetime(flight['arrival_time'], dayfirst=True))
+                or (pd.to_datetime(flight['departure_time'],dayfirst=True) <= timerange[0] <= pd.to_datetime(flight['arrival_time'], dayfirst=True))):
             return extract_part_using_flight_id(aircraft_id, flight['flight_id'], airport_partition)
 
 
@@ -254,7 +256,7 @@ def from_partition_to_dataframe(partition_list: list) -> pd.DataFrame:
 
 
 def schedule_time_checker(new_schedule: pd.DataFrame) -> bool:
-    """Проверяет, не накладываются ли по времени рейсы в новом расписании"""
+    """Проверяет, не накладываются ли по времени рейсы в новом расписании(min время между рейсами 30 минут)"""
     aircraft_ids = new_schedule['aircraft_id'].unique().tolist()
     flag = True
     for aircraft_id in aircraft_ids:
@@ -262,7 +264,7 @@ def schedule_time_checker(new_schedule: pd.DataFrame) -> bool:
         for index in range(len(aircraft_flights) - 1):
             arrival_time = aircraft_flights['arrival_time'].iloc[index]
             next_departure_time = aircraft_flights['departure_time'].iloc[index + 1]
-            if (pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds() < 3000:
+            if (pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds() < 30 * 60:
                 flag = False
     return flag
 
@@ -321,33 +323,59 @@ def remake_technical_service_table(technical_service_table: pd.DataFrame, schedu
     return technical_service_table_copy
 
 
-def checking_time_differences(aircraft_flights: pd.DataFrame, time_size: timedelta):
-    """Проверяет, есть ли необходимый диапазон времени в перерывах между переданными рейсами конкретного ВС"""
+def allowed_time_differences(aircraft_flights: pd.DataFrame, time_size: timedelta, allowed_times: list):
+    """Проверяет, есть ли необходимый диапазон времени в перерывах между переданными рейсами конкретного ВС,
+    в параметр allowed_times добавляются временные промежутки когда может быть проведено ТО"""
     flag = False
     for index in range(len(aircraft_flights.index) - 1):
         arrival_time = pd.to_datetime(aircraft_flights['arrival_time']).iloc[index]
         next_departure_time = pd.to_datetime(aircraft_flights['departure_time']).iloc[index + 1]
         time_delta = next_departure_time - arrival_time
         if time_delta >= time_size:
+            allowed_times.append([arrival_time, next_departure_time])
             flag = True
     return flag
 
 
-def technical_service_checker(new_schedule: pd.DataFrame, technical_service_table: pd.DataFrame) -> bool:
-    """Добавить проверку, что не только есть свободный time gap, но и в нужный день и время"""
+def checking_allowed_ts_time(technical_service_table: pd.DataFrame, ts_allowed_time: list, ts_used_time: list) -> int:
+    ts_times = list(zip(pd.to_datetime(technical_service_table['time_start'], dayfirst=True), pd.to_datetime(technical_service_table['time_finish'], dayfirst=True)))
+    flag = False
+    count = 0
+    for allowed_time in ts_allowed_time:
+        if (allowed_time[0], allowed_time[1]) in ts_times:
+            count += 1
+            if allowed_time not in ts_used_time:
+                flag = True
+                ts_allowed_time.remove(allowed_time)
+                ts_used_time.append(allowed_time)
+                break
+    # Штраф если flag = False
+    if not flag:
+        count = 1000
+    return count
+
+
+def ts_time_shifts(new_schedule: pd.DataFrame, technical_service_table: pd.DataFrame) -> int:
+    """Суммарное количество сдвинутых ТО -> min"""
     technical_service_table = remake_technical_service_table(technical_service_table, new_schedule)
     technical_service_aircraft_ids = technical_service_table['aircraft_id'].unique().tolist()
-    flag = True
+    summary_count = 0
     for aircraft_id in technical_service_aircraft_ids:
         aircraft_flights = aircraft_flight_line(aircraft_id, new_schedule)
         aircraft_ts = technical_service_table[technical_service_table['aircraft_id'] == aircraft_id]
         technical_service_ids = aircraft_ts['technical_service_id'].unique().tolist()
+        ts_used_time = []
+        ts_allowed_time = []
         for technical_service_id in technical_service_ids:
             time_size = aircraft_ts[aircraft_ts['technical_service_id'] == technical_service_id]['time_size'].iloc[0]
             time_size = pd.to_timedelta(time_size)
-            if not checking_time_differences(aircraft_flights, time_size):
-                flag = False
-    return flag
+            if not allowed_time_differences(aircraft_flights, time_size, ts_allowed_time):
+                # Штраф за невозможность проведения ТО
+                summary_count += 1000
+            else:
+                count = checking_allowed_ts_time(technical_service_table, ts_allowed_time, ts_used_time)
+                summary_count += count
+    return summary_count
 
 
 def swap(trigger_aircraft: int,
@@ -367,16 +395,19 @@ def swap(trigger_aircraft: int,
     trigger_part = extract_part_using_flight_id(trigger_aircraft, trigger_flight_id, partition_list)
     health_part = extract_part_from_timerange(health_aircraft, nearest_flights, trigger_timerange, partition_list)
 
+    global DIFF
     for part in partition_list:
         if part == trigger_part:
             for flight in part:
                 flight['aircraft_id'] = health_aircraft
+                DIFF += 1
         if part == health_part:
             for flight in part:
                 flight['aircraft_id'] = trigger_aircraft
+                DIFF += 1
 
     new_schedule = from_partition_to_dataframe(partition_list)
-    new_schedule = new_schedule.sort_values(by=['aircraft_id', 'departure_time'])
+    new_schedule = new_schedule.sort_values(by=['aircraft_id', 'departure_time']).reset_index(drop=True)
     return new_schedule
 
 
@@ -393,9 +424,9 @@ def disrupted_flights_for_aircraft_id(aircraft_id: int,
 
 
 def schedule_differences(previous_schedule: pd.DataFrame, new_schedule: pd.DataFrame) -> int:
-    """Кол-во переставленных связок(рейсов) и суммарное время сдвинутых ТО(не дольше суток) -> min"""
-    diff = (previous_schedule != new_schedule).any(axis=1).sum()
-    return diff
+    """Кол-во переставленных рейсов -> min"""
+    global DIFF
+    return DIFF
 
 
 def penalty_function(new_schedule: pd.DataFrame,
@@ -405,6 +436,7 @@ def penalty_function(new_schedule: pd.DataFrame,
     if not (schedule_time_checker(new_schedule)
             and airports_checker(new_schedule)
             and equipment_checker(new_schedule, flight_equipment_table, aircraft_equipment_table)):
+        print(schedule_time_checker(new_schedule))
         return penalty
     return 0
 
@@ -413,23 +445,33 @@ curr_time = datetime(2025, 1, 22, 0, 0)
 nearest_sched = nearest_flights_selection(previous_solution, curr_time, 'KJA', 'LED')
 # nearest_sched.to_csv('csv_files/nearest_schedule.csv', index=False, sep=';')
 parts = base_airports_partition(nearest_sched, 'KJA', 'LED')
-b = generate_airport_pairs(nearest_sched)
-equipment_disrupted_list = equipment_disrupted_flights(flight_equipments, nearest_sched, problematic_aircraft_equipment, curr_time, 0, 1, 2)
-flight_shift_disrupted_list = flight_shift_disrupted_flights(previous_solution, problematic_flight_shift, 0, 1, 2)
-disrupted_flights = disrupted_flights_for_aircraft_id(3, equipment_disrupted_list, flight_shift_disrupted_list)
+
+# equipment_disrupted_list = equipment_disrupted_flights(flight_equipments, nearest_sched, problematic_aircraft_equipment, curr_time, 0, 1, 2)
+# flight_shift_disrupted_list = flight_shift_disrupted_flights(previous_solution, problematic_flight_shift, 0, 1, 2)
+# disrupted_flights = disrupted_flights_for_aircraft_id(3, equipment_disrupted_list, flight_shift_disrupted_list)
+# print(disrupted_flights)
+
 trigger_aircraft_list = (extract_trigger_aircraft_ids(problematic_aircraft_equipment) +
                          extract_trigger_aircraft_ids(problematic_flight_shift))
 
-new_partition = swap(3, 6, parts, nearest_sched, trigger_aircraft_list, 'FV6516')
+new_partition = swap(3, 13, parts, nearest_sched, trigger_aircraft_list, 'FV6516')
+print(ts_time_shifts(new_partition, technical_service) + schedule_differences(nearest_sched, new_partition) + penalty_function(new_partition, flight_equipments, aircraft))
+# new_partition.to_csv('csv_files/new_schedule_RIGHT_TEST.csv', index=False, sep=';')
+
+new_partition = swap(3, 6, parts, nearest_sched, trigger_aircraft_list, 'FV6878')
+print(ts_time_shifts(new_partition, technical_service) + schedule_differences(nearest_sched, new_partition) + penalty_function(new_partition, flight_equipments, aircraft))
+# new_partition.to_csv('csv_files/new_schedule_WRONG_TEST.csv', index=False, sep=';')
+
+
 # new_schedule_dataframe = from_partition_to_dataframe(new_partition)
 # new_partition.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
-
 # print(schedule_differences(nearest_sched, new_partition))
 # print("Columns in previous_schedule:", nearest_sched.columns)
 # print("Columns in new_schedule:", new_partition.columns)
 # print(airports_checker(6, new_partition))
 # print(penalty_function(nearest_sched, flight_equipments, aircraft))
-print(technical_service_checker(new_partition, technical_service))
+# print(technical_service_checker(new_partition, technical_service))
+# print(schedule_differences(nearest_sched, new_partition))
 # print(get_time_diapason_for_aircraft(1, new_partition))
 # print(remake_technical_service_table(technical_service, new_partition, curr_time))
 # print(checking_time_differences(aircraft_flight_line(1, new_partition), pd.to_timedelta("0 days 10:00:00")))
