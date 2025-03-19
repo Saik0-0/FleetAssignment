@@ -1,6 +1,5 @@
 import ast
 from itertools import chain
-
 import pandas as pd
 from ast import literal_eval
 from datetime import datetime, timedelta
@@ -9,7 +8,6 @@ from dateutil import parser
 '''
 Добавить проверку что переданные в equipment_disrupted_flights() индексы есть в problematic_aircraft_equipment.csv
 '''
-
 
 pd.set_option("display.max_columns", None)
 # парк доступных вс
@@ -35,8 +33,11 @@ def nearest_flights_selection(previous_solution_table: pd.DataFrame,
     """Возвращает часть расписания (указанная дата + 3 суток)"""
     previous_solution_table_result = pd.DataFrame(columns=previous_solution_table.columns)
     for index, flight_row in previous_solution_table.iterrows():
-        if current_time <= pd.to_datetime(flight_row['departure_time'], dayfirst=True) <= current_time + timedelta(days=2, hours=23, minutes=59):
-            if pd.to_datetime(previous_solution_table.iloc[index + 1]['departure_time'], dayfirst=True) > current_time + timedelta(days=2, hours=23, minutes=59) and flight_row['arrival_airport_code'] not in base_airports:
+        if current_time <= pd.to_datetime(flight_row['departure_time'], dayfirst=True) <= current_time + timedelta(
+                days=2, hours=23, minutes=59):
+            if (index + 1 < len(previous_solution_table.index) and pd.to_datetime(previous_solution_table.iloc[index + 1]['departure_time'],
+                               dayfirst=True) > current_time + timedelta(days=2, hours=23, minutes=59)
+                    and flight_row['arrival_airport_code'] not in base_airports):
                 previous_solution_table_result.loc[len(previous_solution_table_result.index)] = flight_row
                 sub_index = index + 1
                 base_airport_flag = 1
@@ -45,7 +46,8 @@ def nearest_flights_selection(previous_solution_table: pd.DataFrame,
                         if previous_solution_table.iloc[sub_index]['departure_airport_code'] in base_airports:
                             base_airport_flag = 0
                         else:
-                            previous_solution_table_result.loc[len(previous_solution_table_result.index)] = previous_solution_table.iloc[sub_index]
+                            previous_solution_table_result.loc[len(previous_solution_table_result.index)] = \
+                                previous_solution_table.iloc[sub_index]
                             if sub_index < len(previous_solution_table) - 1:
                                 sub_index += 1
                             else:
@@ -54,7 +56,8 @@ def nearest_flights_selection(previous_solution_table: pd.DataFrame,
             if index == 0:
                 if flight_row['departure_airport_code'] not in base_airports:
                     continue
-            elif not any((previous_solution_table_result == previous_solution_table.iloc[index - 1]).all(axis=1)) and flight_row['departure_airport_code'] not in base_airports:
+            elif (not any((previous_solution_table_result == previous_solution_table.iloc[index - 1]).all(axis=1))
+                  and flight_row['departure_airport_code'] not in base_airports):
                 continue
             previous_solution_table_result.loc[len(previous_solution_table_result.index)] = flight_row
 
@@ -75,7 +78,8 @@ def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
     # значения - индексы нового оборудования
     new_equipment_dict = {}
     for aircraft_id in problematic_aircrafts:
-        new_equipment_dict[aircraft_id] = disruptions_table[disruptions_table['aircraft_id'] == aircraft_id]['equipment_id'].tolist()[0]
+        new_equipment_dict[aircraft_id] = \
+            disruptions_table[disruptions_table['aircraft_id'] == aircraft_id]['equipment_id'].tolist()[0]
 
     problematic_flights = previous_solution_table[previous_solution_table['aircraft_id'].isin(problematic_aircrafts)]
 
@@ -83,15 +87,22 @@ def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
     # значения - set из id рейсов куда распределены самолеты
     problematic_flights_id = {}
     for aircraft_id in problematic_aircrafts:
-        problematic_flights_id[aircraft_id] = set(problematic_flights[problematic_flights['aircraft_id'] == aircraft_id]['flight_id'].tolist())
+        problematic_flights_id[aircraft_id] = set(
+            problematic_flights[problematic_flights['aircraft_id'] == aircraft_id]['flight_id'].tolist())
 
     disrupted_flights = []
     for aircraft_id in problematic_aircrafts:
-        flight_equipments_subtable = flight_equipments_table[flight_equipments_table['flight_id'].isin(problematic_flights_id[aircraft_id])]
+        flight_equipments_subtable = flight_equipments_table[
+            flight_equipments_table['flight_id'].isin(problematic_flights_id[aircraft_id])]
         for flight_id in problematic_flights_id[aircraft_id]:
-            previous_solution_id = previous_solution_table[previous_solution_table['flight_id'] == flight_id]['previous_solution_id'].iloc[0]
-            if new_equipment_dict[aircraft_id] not in literal_eval(flight_equipments_subtable[flight_equipments_subtable['flight_id'] == flight_id]['equipment_ids'].iloc[0]):
-                disrupted_flights.append({'flight_id': flight_id, 'aircraft_id': aircraft_id, 'previous_solution_id': int(previous_solution_id)})
+            previous_solution_id = \
+                previous_solution_table[previous_solution_table['flight_id'] == flight_id]['previous_solution_id'].iloc[
+                    0]
+            if new_equipment_dict[aircraft_id] not in literal_eval(
+                    flight_equipments_subtable[flight_equipments_subtable['flight_id'] == flight_id][
+                        'equipment_ids'].iloc[0]):
+                disrupted_flights.append({'flight_id': flight_id, 'aircraft_id': aircraft_id,
+                                          'previous_solution_id': int(previous_solution_id)})
 
     return disrupted_flights
 
@@ -133,20 +144,23 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
     disrupted_flights = []
 
     for disruption_id in disruption_ids:
-        previous_solution_id = disruptions_table[disruptions_table['problematic_flight_shift_id'] == disruption_id]['previous_solution_id'].iloc[0]
+        previous_solution_id = disruptions_table[disruptions_table['problematic_flight_shift_id'] == disruption_id][
+            'previous_solution_id'].iloc[0]
         if previous_solution_id not in previous_solution_table['previous_solution_id'].values:
             continue
 
         new_arrival_time = get_time_from_table(disruptions_table, previous_solution_id, 'new_arrival_time')
         next_departure_time = get_time_from_table(previous_solution_table, previous_solution_id, 'departure_time')
 
-        flight_id = previous_solution_table[previous_solution_table['previous_solution_id'] == previous_solution_id]['flight_id'].iloc[0]
+        flight_id = previous_solution_table[previous_solution_table['previous_solution_id'] == previous_solution_id][
+            'flight_id'].iloc[0]
         aircraft_id = problematic_aircrafts[disruption_id]
 
         time_delta = next_departure_time - new_arrival_time
         # 30 минут = минимальное окно между рейсами
         if time_delta.total_seconds() < 30 * 60:
-            disrupted_flights.append({'flight_id': flight_id, 'aircraft_id': aircraft_id, 'previous_solution_id': int(previous_solution_id)})
+            disrupted_flights.append(
+                {'flight_id': flight_id, 'aircraft_id': aircraft_id, 'previous_solution_id': int(previous_solution_id)})
 
     return disrupted_flights
 
@@ -225,13 +239,31 @@ def extract_part_using_flight_id(aircraft_id: int, flight_id: str, airports_part
     return trigger_part
 
 
-def extract_part_from_timerange(aircraft_id: int, nearest_schedule: pd.DataFrame, timerange: list, airport_partition: list) -> list:
+def extract_next_or_previous_part(aircraft_id: int, part: list, airports_partition: list, param: str) -> list:
+    """Возвращает предыдущую или следующую связку ВС от переданной связки.
+    Параметр flag принимает строки 'prev' или 'next'"""
+    for index in range(len(airports_partition)):
+        if airports_partition[index] == part:
+            if param == 'prev' and index > 0:
+                if airports_partition[index - 1][0]['aircraft_id'] == aircraft_id:
+                    return airports_partition[index - 1]
+            if param == 'next' and index < len(airports_partition) - 1:
+                if airports_partition[index + 1][0]['aircraft_id'] == aircraft_id:
+                    return airports_partition[index + 1]
+    return []
+
+
+def extract_part_from_timerange(aircraft_id: int, nearest_schedule: pd.DataFrame, timerange: list,
+                                airport_partition: list) -> list:
     """Возвращает связку, один из полётов который попадает в указанный временной отрезок"""
     aircraft_flights = aircraft_flight_line(aircraft_id, nearest_schedule)
     for index, flight in aircraft_flights.iterrows():
-        if ((pd.to_datetime(flight['departure_time'], dayfirst=True) >= timerange[0] and pd.to_datetime(flight['arrival_time'], dayfirst=True) <= timerange[1])
-                or (pd.to_datetime(flight['departure_time'], dayfirst=True) <= timerange[1] <= pd.to_datetime(flight['arrival_time'], dayfirst=True))
-                or (pd.to_datetime(flight['departure_time'],dayfirst=True) <= timerange[0] <= pd.to_datetime(flight['arrival_time'], dayfirst=True))):
+        if ((pd.to_datetime(flight['departure_time'], dayfirst=True) >= timerange[0] and pd.to_datetime(
+                flight['arrival_time'], dayfirst=True) <= timerange[1])
+                or (pd.to_datetime(flight['departure_time'], dayfirst=True) <= timerange[1] <= pd.to_datetime(
+                    flight['arrival_time'], dayfirst=True))
+                or (pd.to_datetime(flight['departure_time'], dayfirst=True) <= timerange[0] <= pd.to_datetime(
+                    flight['arrival_time'], dayfirst=True))):
             return extract_part_using_flight_id(aircraft_id, flight['flight_id'], airport_partition)
 
 
@@ -249,6 +281,7 @@ def from_partition_to_dataframe(partition_list: list) -> pd.DataFrame:
     new_schedule = pd.DataFrame(temp_list)
     new_schedule['departure_time'] = new_schedule['departure_time'].astype(str)
     new_schedule['arrival_time'] = new_schedule['arrival_time'].astype(str)
+    new_schedule = new_schedule.sort_values(by=['aircraft_id', 'departure_time']).reset_index(drop=True)
 
     return new_schedule
 
@@ -336,7 +369,8 @@ def allowed_time_differences(aircraft_flights: pd.DataFrame, time_size: timedelt
 
 
 def checking_allowed_ts_time(technical_service_table: pd.DataFrame, ts_allowed_time: list, ts_used_time: list) -> int:
-    ts_times = list(zip(pd.to_datetime(technical_service_table['time_start'], dayfirst=True), pd.to_datetime(technical_service_table['time_finish'], dayfirst=True)))
+    ts_times = list(zip(pd.to_datetime(technical_service_table['time_start'], dayfirst=True),
+                        pd.to_datetime(technical_service_table['time_finish'], dayfirst=True)))
     flag = False
     count = 0
     for allowed_time in ts_allowed_time:
@@ -376,6 +410,119 @@ def ts_time_shifts(new_schedule: pd.DataFrame, technical_service_table: pd.DataF
     return summary_count
 
 
+def move_parts(trigger_aircraft: int, health_aircraft: int, trigger_part: list, health_part: list,
+               partition_list: list) -> list:
+    """Меняет местами назначения для переданных ВС в переданных связках, возвращает новое разбиение на связки"""
+    for part in partition_list:
+        if part == trigger_part:
+            for flight in part:
+                flight['aircraft_id'] = health_aircraft
+        if part == health_part:
+            for flight in part:
+                flight['aircraft_id'] = trigger_aircraft
+    return partition_list
+
+
+def smart_swap(trigger_aircraft: int,
+               health_aircraft: int,
+               partition_list: list,
+               nearest_flights: pd.DataFrame,
+               trigger_aircraft_ids: list,
+               trigger_flight_id: str,
+               flight_equipment_table: pd.DataFrame,
+               aircraft_equipment_table: pd.DataFrame) -> pd.DataFrame:
+    """Делаем swap между ВС по связкам пока не будут удовлетворены все штрафные функции"""
+    if trigger_aircraft not in trigger_aircraft_ids and health_aircraft in trigger_aircraft_ids:
+        trigger_aircraft, health_aircraft, = health_aircraft, trigger_aircraft
+    elif health_aircraft not in trigger_aircraft_ids and trigger_aircraft not in trigger_aircraft_ids:
+        return nearest_flights
+
+    trigger_timerange = extract_trigger_time_range(trigger_aircraft, trigger_flight_id, partition_list)
+    trigger_part = extract_part_using_flight_id(trigger_aircraft, trigger_flight_id, partition_list)
+    health_part = extract_part_from_timerange(health_aircraft, nearest_flights, trigger_timerange, partition_list)
+    temp_partition = move_parts(trigger_aircraft, health_aircraft, trigger_part, health_part, partition_list)
+
+    if health_part is None or trigger_part is None:
+        print(f'Одна из связок пустая')
+        if penalty_function(from_partition_to_dataframe(temp_partition), flight_equipment_table, aircraft_equipment_table) != 0:
+            print(f'Раписание не удовлятворяет штрафной функции')
+        return from_partition_to_dataframe(temp_partition)
+
+    empty_prev_flag = False
+    good_prev_partition = False
+    empty_next_flag = False
+    good_next_partition = False
+
+    temp_trigger_part_for_find_prev = trigger_part
+    temp_health_part_for_find_prev = health_part
+    temp_trigger_part_for_find_next = trigger_part
+    temp_health_part_for_find_next = health_part
+    pd_for_test = from_partition_to_dataframe(temp_partition)
+
+    # Для проверки новых связок триггерного рейса влево
+    ind_trigger_last = pd_for_test.loc[(pd_for_test['aircraft_id'] == trigger_aircraft) & (
+                pd_for_test['previous_solution_id'] == health_part[-1]['previous_solution_id'])].index[0]
+    # Для проверки новых связок триггерного рейса вправо
+    ind_trigger_first = pd_for_test.loc[(pd_for_test['aircraft_id'] == trigger_aircraft) & (
+                pd_for_test['previous_solution_id'] == health_part[0]['previous_solution_id'])].index[0]
+    # Для проверки новых связок здорового рейса влево
+    ind_health_last = pd_for_test.loc[(pd_for_test['aircraft_id'] == health_aircraft) & (
+                pd_for_test['previous_solution_id'] == trigger_part[-1]['previous_solution_id'])].index[0]
+    # Для проверки новых связок здорового рейса вправо
+    ind_health_first = pd_for_test.loc[(pd_for_test['aircraft_id'] == health_aircraft) & (
+                pd_for_test['previous_solution_id'] == trigger_part[0]['previous_solution_id'])].index[0]
+
+    while True:
+        trigger_prev_part = extract_next_or_previous_part(trigger_aircraft, temp_trigger_part_for_find_prev,
+                                                          partition_list, 'prev')
+        health_prev_part = extract_next_or_previous_part(health_aircraft, temp_health_part_for_find_prev,
+                                                         partition_list, 'prev')
+        if trigger_prev_part != [] and health_prev_part != [] and good_prev_partition is False:
+            temp_partition = move_parts(trigger_aircraft, health_aircraft, trigger_prev_part, health_prev_part,
+                                        temp_partition)
+            temp_trigger_part_for_find_prev = trigger_prev_part
+            temp_health_part_for_find_prev = health_prev_part
+
+            pd_for_test = from_partition_to_dataframe(temp_partition)
+            pd_trigger_for_test = pd_for_test.loc[(pd_for_test['aircraft_id'] == trigger_aircraft) & (pd_for_test.index <= ind_trigger_last)]
+            pd_health_for_test = pd_for_test.loc[ (pd_for_test['aircraft_id'] == health_aircraft) & (pd_for_test.index <= ind_health_last)]
+            prev_penalty_flag = (penalty_function(pd_trigger_for_test, flight_equipment_table, aircraft_equipment_table) == 0
+                                 and penalty_function(pd_health_for_test, flight_equipment_table, aircraft_equipment_table) == 0)
+            if prev_penalty_flag:
+                good_prev_partition = True
+        else:
+            empty_prev_flag = True
+
+        trigger_next_part = extract_next_or_previous_part(trigger_aircraft, temp_trigger_part_for_find_next,
+                                                          partition_list, 'next')
+        health_next_part = extract_next_or_previous_part(health_aircraft, temp_health_part_for_find_next,
+                                                         partition_list, 'next')
+        if trigger_next_part != [] and health_next_part != [] and good_next_partition is False:
+            temp_partition = move_parts(trigger_aircraft, health_aircraft, trigger_next_part, health_next_part,
+                                        temp_partition)
+            temp_trigger_part_for_find_next = trigger_next_part
+            temp_health_part_for_find_next = health_next_part
+
+            pd_for_test = from_partition_to_dataframe(temp_partition)
+            pd_trigger_for_test = pd_for_test.loc[(pd_for_test['aircraft_id'] == trigger_aircraft) & (pd_for_test.index >= ind_trigger_first)]
+            pd_health_for_test = pd_for_test.loc[(pd_for_test['aircraft_id'] == health_aircraft) & (pd_for_test.index >= ind_health_first)]
+            next_penalty_flag = (penalty_function(pd_trigger_for_test, flight_equipment_table, aircraft_equipment_table) == 0
+                                 and penalty_function(pd_health_for_test, flight_equipment_table, aircraft_equipment_table) == 0)
+            if next_penalty_flag:
+                good_next_partition = True
+        else:
+            empty_next_flag = True
+
+        if good_next_partition and good_prev_partition:
+            break
+
+        if empty_next_flag is True or empty_prev_flag is True:
+            print(f'Одна из частей стала пустой')
+            break
+
+    return from_partition_to_dataframe(temp_partition)
+
+
 def swap(trigger_aircraft: int,
          health_aircraft: int,
          partition_list: list,
@@ -393,16 +540,9 @@ def swap(trigger_aircraft: int,
     trigger_part = extract_part_using_flight_id(trigger_aircraft, trigger_flight_id, partition_list)
     health_part = extract_part_from_timerange(health_aircraft, nearest_flights, trigger_timerange, partition_list)
 
-    for part in partition_list:
-        if part == trigger_part:
-            for flight in part:
-                flight['aircraft_id'] = health_aircraft
-        if part == health_part:
-            for flight in part:
-                flight['aircraft_id'] = trigger_aircraft
+    new_partition = move_parts(trigger_aircraft, health_aircraft, trigger_part, health_part, partition_list)
 
-    new_schedule = from_partition_to_dataframe(partition_list)
-    new_schedule = new_schedule.sort_values(by=['aircraft_id', 'departure_time']).reset_index(drop=True)
+    new_schedule = from_partition_to_dataframe(new_partition)
     return new_schedule
 
 
@@ -424,7 +564,8 @@ def schedule_differences(previous_schedule: pd.DataFrame, new_schedule: pd.DataF
     new_flights = []
     diff = 0
     for index in range(len(previous_schedule)):
-        prev_flights.append((previous_schedule['aircraft_id'].iloc[index], previous_schedule['previous_solution_id'].iloc[index]))
+        prev_flights.append(
+            (previous_schedule['aircraft_id'].iloc[index], previous_schedule['previous_solution_id'].iloc[index]))
         new_flights.append((new_schedule['aircraft_id'].iloc[index], new_schedule['previous_solution_id'].iloc[index]))
     for pair in prev_flights:
         if pair not in new_flights:
@@ -458,23 +599,26 @@ nearest_sched = nearest_flights_selection(previous_solution, curr_time, 'KJA', '
 # nearest_sched.to_csv('csv_files/nearest_schedule.csv', index=False, sep=';')
 parts = base_airports_partition(nearest_sched, 'KJA', 'LED')
 
-# equipment_disrupted_list = equipment_disrupted_flights(flight_equipments, nearest_sched, problematic_aircraft_equipment, curr_time, 0, 1, 2)
-# flight_shift_disrupted_list = flight_shift_disrupted_flights(previous_solution, problematic_flight_shift, 0, 1, 2)
-# disrupted_flights = disrupted_flights_for_aircraft_id(3, equipment_disrupted_list, flight_shift_disrupted_list)
+# equipment_disrupted_list = equipment_disrupted_flights(flight_equipments, nearest_sched, problematic_aircraft_equipment, curr_time, 0, 1, 2, 3, 4)
+# flight_shift_disrupted_list = flight_shift_disrupted_flights(previous_solution, problematic_flight_shift, 0, 1, 2, 3)
+# disrupted_flights = disrupted_flights_for_aircraft_id(13, equipment_disrupted_list, flight_shift_disrupted_list)
 # print(disrupted_flights)
 
 trigger_aircraft_list = (extract_trigger_aircraft_ids(problematic_aircraft_equipment) +
                          extract_trigger_aircraft_ids(problematic_flight_shift))
 
-new_partition = swap(3, 13, parts, nearest_sched, trigger_aircraft_list, 'FV6516')
+# new_nearest_sched = swap(3, 6, parts, nearest_sched, trigger_aircraft_list, 'FV6516')
+# new_nearest_sched.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
+new_nearest_sched_2 = smart_swap(5, 4, parts, nearest_sched, trigger_aircraft_list, 'FV2452', flight_equipments, aircraft)
+new_nearest_sched_2.to_csv('csv_files/new_schedule_2.csv', index=False, sep=';')
 
-print(ts_time_shifts(new_partition, technical_service) + schedule_differences(nearest_sched, new_partition) + penalty_function(new_partition, flight_equipments, aircraft))
 # new_partition.to_csv('csv_files/new_schedule_RIGHT_TEST.csv', index=False, sep=';')
 
-new_partition = swap(3, 6, parts, nearest_sched, trigger_aircraft_list, 'FV6878')
-print(ts_time_shifts(new_partition, technical_service) + schedule_differences(nearest_sched, new_partition) + penalty_function(new_partition, flight_equipments, aircraft))
+# new_partition = swap(3, 6, parts, nearest_sched, trigger_aircraft_list, 'FV6878')
+# print(ts_time_shifts(new_partition, technical_service) + schedule_differences(nearest_sched,
+#                                                                               new_partition) + penalty_function(
+#     new_partition, flight_equipments, aircraft))
 # new_partition.to_csv('csv_files/new_schedule_WRONG_TEST.csv', index=False, sep=';')
-
 
 # new_schedule_dataframe = from_partition_to_dataframe(new_partition)
 # new_partition.to_csv('csv_files/new_schedule.csv', index=False, sep=';')
