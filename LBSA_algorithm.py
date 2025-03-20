@@ -83,16 +83,15 @@ def list_based_sa_algorithm(temperature_list, max_iteration_times, markov_chain_
     # Generate an initial solution x randomly
     current_solution = [i for i in range(amount_of_citys)]
     random.shuffle(current_solution)
-    result_list = []
-    probability_list = []
-    exponent_list = []
-    temperature_list_for_plot = []
-
-    columns = ['outer_loop_iterator', 'inner_loop_iterator', 'temperature_list', 'temperature_max', 'current_solution', 'current_solution_distance_sum', 'candidate_solution', 'candidate_solution_distance_sum', 'probability', 'exponent']
+    # result_list = []
+    # probability_list = []
+    # exponent_list = []
+    # temperature_list_for_plot = []
+    # objective_functions_list = []
 
     while outer_loop_iterator <= max_iteration_times:
         temperature_max = max(temperature_list)
-        temperature_list_for_plot.append(temperature_max)
+        # temperature_list_for_plot.append(temperature_max)
         outer_loop_iterator += 1
         temperature = 0
         bad_solution_count, inner_loop_iterator = 0, 0
@@ -112,17 +111,10 @@ def list_based_sa_algorithm(temperature_list, max_iteration_times, markov_chain_
             else:
                 safe_temperature_max = max(temperature_max, 1e-10)
                 exponent = -(candidate_solution_distance_sum - current_solution_distance_sum) / safe_temperature_max
-                exponent_list.append(exponent)
+                # exponent_list.append(exponent)
                 probability = math.exp(exponent)
-                # if exponent < -1000000:
-                #     print(probability)
                 random_float = random.random()
                 if random_float < probability:
-
-                    # if exponent < -1:
-                    #     print(exponent, probability)
-                    # prev_temp = temperature
-
                     # когда temperature == 0 и candidate_solution_distance_sum == current_solution_distance_sum получается число меньшее 1e-10
                     temperature = max((temperature - candidate_solution_distance_sum + current_solution_distance_sum) / math.log(random_float), 1e-10)
                     # temperature_list_for_plot.append(temperature_max)
@@ -134,8 +126,9 @@ def list_based_sa_algorithm(temperature_list, max_iteration_times, markov_chain_
                     current_solution = candidate_solution
                 else:
                     pass
-            probability_list.append(probability)
-            result_list.append(calculate_distance_of_permutation(current_solution))
+            # objective_functions_list.append(current_solution_distance_sum)
+            # probability_list.append(probability)
+            # result_list.append(calculate_distance_of_permutation(current_solution))
 
         if bad_solution_count != 0:
             temperature_list.remove(temperature_max)
@@ -143,12 +136,13 @@ def list_based_sa_algorithm(temperature_list, max_iteration_times, markov_chain_
             temperature_list.append(temperature / bad_solution_count)
 
     # print(probability_list)
-    # plt.plot(range(max_iteration_times), temperature_list_for_plot[:max_iteration_times])
+    # plt.plot(range(5000), temperature_list_for_plot[:5000])
+    # plt.plot(range(5000), objective_functions_list[:5000])
     # plt.plot(range(max_iteration_times), probability_list[:max_iteration_times])
     # plt.plot(range(max_iteration_times*markov_chain_length), result_list[:max_iteration_times*markov_chain_length])
     # plt.plot(range(9000), exponent_list[:9000])
-    plt.plot()
-    plt.show()
+    # plt.plot()
+    # plt.show()
     return calculate_distance_of_permutation(current_solution)
 
 
