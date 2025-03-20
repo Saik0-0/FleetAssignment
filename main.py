@@ -5,10 +5,6 @@ from ast import literal_eval
 from datetime import datetime, timedelta
 from dateutil import parser
 
-'''
-Добавить проверку что переданные в equipment_disrupted_flights() индексы есть в problematic_aircraft_equipment.csv
-'''
-
 
 def change_aircraft_equipment(problematic_aircraft_equipment_table: pd.DataFrame,
                               aircraft_table: pd.DataFrame,
