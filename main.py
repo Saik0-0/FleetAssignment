@@ -2,7 +2,7 @@ import ast
 import math
 from itertools import chain
 import random
-
+import time
 import pandas as pd
 from ast import literal_eval
 from datetime import datetime, timedelta
@@ -72,6 +72,7 @@ def nearest_flights_selection(previous_solution_table: pd.DataFrame,
                               current_time: datetime,
                               *base_airports: str) -> pd.DataFrame:
     """Возвращает часть расписания (указанная дата + 3 суток)"""
+    start = time.time()
     previous_solution_table_result = pd.DataFrame(columns=previous_solution_table.columns)
     for index, flight_row in previous_solution_table.iterrows():
         if current_time <= pd.to_datetime(flight_row['departure_time'], dayfirst=True) <= current_time + timedelta(
@@ -106,14 +107,15 @@ def nearest_flights_selection(previous_solution_table: pd.DataFrame,
 
 
 def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
-                                previous_solution_table: pd.DataFrame,
+                                nearest_schedule: pd.DataFrame,
                                 disruptions_table: pd.DataFrame,
                                 current_time: datetime,
                                 *disruption_ids: int) -> list:
     """Возвращает список полётов, которые становятся невыполнимыми из-за смены оснащения ВС"""
     disruptions_table = disruptions_table.loc[[*disruption_ids]]
     problematic_aircrafts = disruptions_table['aircraft_id'].tolist()
-    previous_solution_table = nearest_flights_selection(previous_solution_table, current_time)
+
+    '''Здесь исправить: изначально передавать выборку трёх дней'''
 
     # Структура словаря: ключи - id самолетов с изменением оборудования,
     # значения - индексы нового оборудования
@@ -122,7 +124,7 @@ def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
         new_equipment_dict[aircraft_id] = \
             disruptions_table[disruptions_table['aircraft_id'] == aircraft_id]['equipment_id'].tolist()[0]
 
-    problematic_flights = previous_solution_table[previous_solution_table['aircraft_id'].isin(problematic_aircrafts)]
+    problematic_flights = nearest_schedule[nearest_schedule['aircraft_id'].isin(problematic_aircrafts)]
 
     # Структура словаря: ключи - id самолетов с изменением оборудования,
     # значения - set из id рейсов куда распределены самолеты
@@ -131,13 +133,14 @@ def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
         problematic_flights_id[aircraft_id] = set(
             problematic_flights[problematic_flights['aircraft_id'] == aircraft_id]['flight_id'].tolist())
 
+
     disrupted_flights = []
     for aircraft_id in problematic_aircrafts:
         flight_equipments_subtable = flight_equipments_table[
             flight_equipments_table['flight_id'].isin(problematic_flights_id[aircraft_id])]
         for flight_id in problematic_flights_id[aircraft_id]:
             previous_solution_id = \
-                previous_solution_table[previous_solution_table['flight_id'] == flight_id]['previous_solution_id'].iloc[
+                nearest_schedule[nearest_schedule['flight_id'] == flight_id]['previous_solution_id'].iloc[
                     0]
             if new_equipment_dict[aircraft_id] not in literal_eval(
                     flight_equipments_subtable[flight_equipments_subtable['flight_id'] == flight_id][
@@ -149,16 +152,13 @@ def equipment_disrupted_flights(flight_equipments_table: pd.DataFrame,
 
 
 def equipment_disrupted_flights_checker(flight_equipments_table: pd.DataFrame,
-                                        previous_solution_table: pd.DataFrame,
+                                        nearest_schedule: pd.DataFrame,
                                         disruptions_table: pd.DataFrame,
                                         current_time: datetime,
                                         *disruption_ids: int) -> bool:
     """Возвращает True если расписание остается верным(не ломается от смены оснащения ВС, иначе False)"""
-    if len(equipment_disrupted_flights(flight_equipments_table,
-                                       previous_solution_table,
-                                       disruptions_table,
-                                       current_time,
-                                       *disruption_ids)) > 0:
+    if len(equipment_disrupted_flights(flight_equipments_table, nearest_schedule, disruptions_table,
+                                       current_time, *disruption_ids)) > 0:
         return False
     return True
 
@@ -176,7 +176,7 @@ def get_time_from_table(table: pd.DataFrame, previous_solution_id: int, column_n
     return time_object
 
 
-def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
+def flight_shift_disrupted_flights(nearest_schedule: pd.DataFrame,
                                    disruptions_table: pd.DataFrame,
                                    *disruption_ids: int) -> list:
     """Возвращает список полётов, которые становятся невыполнимыми из-за переноса рейсов
@@ -187,13 +187,13 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
     for disruption_id in disruption_ids:
         previous_solution_id = disruptions_table[disruptions_table['problematic_flight_shift_id'] == disruption_id][
             'previous_solution_id'].iloc[0]
-        if previous_solution_id not in previous_solution_table['previous_solution_id'].values:
+        if previous_solution_id not in nearest_schedule['previous_solution_id'].values:
             continue
 
         new_arrival_time = get_time_from_table(disruptions_table, previous_solution_id, 'new_arrival_time')
-        next_departure_time = get_time_from_table(previous_solution_table, previous_solution_id, 'departure_time')
+        next_departure_time = get_time_from_table(nearest_schedule, previous_solution_id, 'departure_time')
 
-        flight_id = previous_solution_table[previous_solution_table['previous_solution_id'] == previous_solution_id][
+        flight_id = nearest_schedule[nearest_schedule['previous_solution_id'] == previous_solution_id][
             'flight_id'].iloc[0]
         aircraft_id = problematic_aircrafts[disruption_id]
 
@@ -206,11 +206,11 @@ def flight_shift_disrupted_flights(previous_solution_table: pd.DataFrame,
     return disrupted_flights
 
 
-def flight_shift_disrupted_flights_checker(previous_solution_table: pd.DataFrame,
+def flight_shift_disrupted_flights_checker(nearest_schedule: pd.DataFrame,
                                            disruptions_table: pd.DataFrame,
                                            *disruption_ids: int) -> bool:
     """Возвращает True если расписание остается верным(не ломается от переноса рейсов, иначе False)"""
-    if len(flight_shift_disrupted_flights(previous_solution_table, disruptions_table, *disruption_ids)) > 0:
+    if len(flight_shift_disrupted_flights(nearest_schedule, disruptions_table, *disruption_ids)) > 0:
         return False
     return True
 
@@ -279,21 +279,21 @@ def disrupted_flights_for_aircraft_id(aircraft_id: int,
 def all_trigger_aircraft_and_flight(equipment_disruption_table: pd.DataFrame,
                                     time_shifts_disruption_table: pd.DataFrame,
                                     old_flight_equipment_table: pd.DataFrame,
-                                    old_previous_schedule: pd.DataFrame,
+                                    old_nearest_previous_schedule: pd.DataFrame,
                                     current_time: datetime) -> dict:
     """Возвращает словарь с ключами id ВС с триггером и в значениях рейсы которые не могут быть выполнены"""
     equipment_trigger_aircrafts = extract_trigger_aircraft_ids(equipment_disruption_table)
     time_shifts_trigger_aircrafts = extract_trigger_aircraft_ids(time_shifts_disruption_table)
-    trigger_aircrafts = list(set(equipment_trigger_aircrafts + time_shifts_trigger_aircrafts))
 
-    equipment_trigger_flights = equipment_disrupted_flights(old_flight_equipment_table,
-                                                            old_previous_schedule,
-                                                            equipment_disruption_table,
-                                                            current_time,
+    trigger_aircrafts = list(set(equipment_trigger_aircrafts + time_shifts_trigger_aircrafts))
+    equipment_trigger_flights = equipment_disrupted_flights(old_flight_equipment_table, old_nearest_previous_schedule,
+                                                            equipment_disruption_table, current_time,
                                                             *range(len(equipment_disruption_table)))
-    time_shifts_trigger_flights = flight_shift_disrupted_flights(old_previous_schedule,
+
+    time_shifts_trigger_flights = flight_shift_disrupted_flights(old_nearest_previous_schedule,
                                                                  time_shifts_disruption_table,
                                                                  *range(len(time_shifts_disruption_table)))
+
 
     trigger_flights_dict = {}
     for aircraft in trigger_aircrafts:
@@ -307,6 +307,8 @@ def all_trigger_aircraft_and_flight(equipment_disruption_table: pd.DataFrame,
 def aircraft_and_flight_random_choice(trigger_flights_dict: dict) -> tuple:
     """Случайным образом выбирает триггерный ВС и рейс для него"""
     trigger_aircraft = random.choice(list(trigger_flights_dict.keys()))
+    while trigger_flights_dict[trigger_aircraft] == []:
+        trigger_aircraft = random.choice(list(trigger_flights_dict.keys()))
     trigger_flight = random.choice(trigger_flights_dict[trigger_aircraft])['flight_id']
     return trigger_aircraft, trigger_flight
 
@@ -468,7 +470,7 @@ def smart_swap(trigger_aircraft: int,
     health_part = extract_part_from_timerange(health_aircraft, nearest_flights, trigger_timerange, partition_list)
     temp_partition = move_parts(trigger_aircraft, health_aircraft, trigger_part, health_part, partition_list)
 
-    if health_part is None or trigger_part is None:
+    if health_part is None:
         # print(f'Одна из связок пустая')
         # if penalty_function(from_partition_to_dataframe(temp_partition), flight_equipment_table, aircraft_equipment_table) != 0:
         #     print(f'Расписание не удовлетворяет штрафной функции')
@@ -543,7 +545,6 @@ def smart_swap(trigger_aircraft: int,
             break
 
         if empty_next_flag is True and empty_prev_flag is True:
-            # print(f'Одна из частей стала пустой')
             break
 
     return from_partition_to_dataframe(temp_partition)
@@ -712,15 +713,21 @@ def list_based_sa_algorithm(temperature_list: list,
             # based on current solution x and a specified
             # neighbourhood structure
 
-            # Здесь надо: также случайно выбрать 2 ВС и случайно выбрать flight_id для триггерного ВС,
+            # Случайно выбрать 2 ВС и случайно выбрать flight_id для триггерного ВС,
             # сделать новое расписание через swap
+            print(f'Now iteration {outer_loop_iterator}, {inner_loop_iterator}. ')
+                  # f'Chosen trigger aircraft: {trigger_aircraft}, trigger flight: {trigger_flight_id}, second aircraft: {aircraft_to_swap}')
+
+            start = time.time()
 
             # Создали словарь, где ключи - ВС с триггером, значения - рейсы которые не могут быть выполнены
             trigger_aircraft_and_flight_dict = all_trigger_aircraft_and_flight(equipment_disruption_table,
                                                                                time_shift_disruption_table,
                                                                                flight_equipments_table,
-                                                                               previous_schedule,
+                                                                               nearest_flights,
                                                                                current_time)
+            print(time.time() - start)
+
             # Сделали список со всеми триггерными ВС
             trigger_aircraft_ids = list(trigger_aircraft_and_flight_dict.keys())
 
@@ -742,8 +749,11 @@ def list_based_sa_algorithm(temperature_list: list,
                                             aircraft_table)
 
             inner_loop_iterator += 1
+
+            # start = time.time()
+
             # Вычисляем objective function для текущего расписания
-            current_solution_objective_func = objective_function(previous_schedule,
+            current_solution_objective_func = objective_function(nearest_flights,
                                                                  current_solution,
                                                                  flight_equipments_table,
                                                                  aircraft_table,
@@ -754,6 +764,7 @@ def list_based_sa_algorithm(temperature_list: list,
                                                                  flight_equipments_table,
                                                                  aircraft_table,
                                                                  technical_service_table)
+            # print(time.time() - start)
 
             if candidate_solution_objective_func < current_solution_objective_func:
                 current_solution = candidate_solution
@@ -833,6 +844,4 @@ print(list_based_sa_algorithm(temperature_list,
                               table_with_aircraft_equipment_info,
                               table_with_technical_service_info,
                               curr_time))
-
-
 
