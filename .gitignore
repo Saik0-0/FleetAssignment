@@ -2,3 +2,6 @@
 .venv/Scripts/
 
 csv_files/**
+test_1/**
+test_2/**
+test_3/**
