@@ -1,6 +1,7 @@
 import ast
 import copy
 import itertools
+import json
 import math
 from itertools import chain
 import random
@@ -11,13 +12,13 @@ from datetime import datetime, timedelta
 from dateutil import parser
 from matplotlib import pyplot as plt
 from gantt_charts import gantt_chart
+pd.set_option("display.max_columns", None)
 
 
 def change_aircraft_equipment(problematic_aircraft_equipment_table: pd.DataFrame,
-                              aircraft_table: pd.DataFrame,
-                              *disruption_ids: int) -> pd.DataFrame:
+                              aircraft_table: pd.DataFrame) -> pd.DataFrame:
     """Меняет данные по оснащению самолетов в соответствии с таблицей сбоев"""
-    problematic_aircraft_equipment_table = problematic_aircraft_equipment_table.loc[[*disruption_ids]]
+    # problematic_aircraft_equipment_table = problematic_aircraft_equipment_table.loc[[*disruption_ids]]
     problematic_aircrafts = problematic_aircraft_equipment_table['aircraft_id'].tolist()
     new_equipment = {}
     for aircraft in problematic_aircrafts:
@@ -32,10 +33,9 @@ def change_aircraft_equipment(problematic_aircraft_equipment_table: pd.DataFrame
 
 def change_disrupted_flights_time(problematic_flight_shift_table: pd.DataFrame,
                                   previous_schedule: pd.DataFrame,
-                                  base_airports: list,
-                                  *disruption_ids: int) -> pd.DataFrame:
+                                  base_airports: list) -> pd.DataFrame:
     """Меняет данные о времени вылета и прилета рейсов в соответствии с таблицей сбоев"""
-    problematic_flight_shift_table = problematic_flight_shift_table.loc[[*disruption_ids]]
+    # problematic_flight_shift_table = problematic_flight_shift_table.loc[[*disruption_ids]]
     problematic_ids = problematic_flight_shift_table['previous_solution_id'].tolist()
     previous_schedule_parts = base_airports_partition(previous_schedule, *base_airports)
     time_shifts = {}
@@ -66,46 +66,18 @@ def change_disrupted_flights_time(problematic_flight_shift_table: pd.DataFrame,
     return previous_schedule
 
 
-pd.set_option("display.max_columns", None)
-# парк доступных вс
-aircraft = pd.read_csv('csv_files/df_aircraft.csv', sep=';')
-aircraft_with_spare = pd.read_csv('test_3/df_aircraft_with_spare_test_3.csv', sep=';')
-# авиарейсы
-flights = pd.read_csv('csv_files/df_flights.csv', sep=';')
-# требования к вс на рейсе
-flight_equipments = pd.read_csv('csv_files/df_flight_equipments.csv', sep=';')
-# текущее распределение вс на рейсы
-previous_solution = pd.read_csv('csv_files/df_previous_solution.csv', sep=';')
-previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
-previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
-# тех обслуживание вс
-technical_service = pd.read_csv('csv_files/df_technical_service.csv', sep=';')
-
-# disruption: изменение оснащения вс
-problematic_aircraft_equipment = pd.read_csv('test_3/df_problematic_aircraft_equipment_test_3.csv', sep=';')
-# disruption: перенос рейсов
-problematic_flight_shift = pd.read_csv('test_3/df_problematic_flight_shift_test_3.csv', sep=';')
-
-# парк доступных вс c измененным оборудованием
-# updated_aircraft = change_aircraft_equipment(problematic_aircraft_equipment, aircraft, 0, 1, 2, 3, 4)
-updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare, 0, 1, 2, 3)
-
-# updated_aircraft.to_csv('csv_files/new_aircraft.csv', index=False, sep=';')
-
-# updated_previous_solution.to_csv('csv_files/new_previous_solution.csv', index=False, sep=';')
-
-
 def nearest_flights_selection(previous_solution_table: pd.DataFrame,
                               current_time: datetime,
+                              time_delta: timedelta,
                               *base_airports: str) -> pd.DataFrame:
     """Возвращает часть расписания (указанная дата + 3 суток)"""
     previous_solution_table_result = pd.DataFrame(columns=previous_solution_table.columns)
     for index, flight_row in previous_solution_table.iterrows():
-        if current_time <= pd.to_datetime(flight_row['departure_time'], dayfirst=True) <= current_time + timedelta(
-                days=2, hours=23, minutes=59):
+        if (current_time <= pd.to_datetime(flight_row['departure_time'], dayfirst=True) <= current_time + time_delta
+                - timedelta(minutes=1)):
             if (index + 1 < len(previous_solution_table.index) and pd.to_datetime(
                     previous_solution_table.iloc[index + 1]['departure_time'],
-                    dayfirst=True) > current_time + timedelta(days=2, hours=23, minutes=59)
+                    dayfirst=True) > current_time + time_delta - timedelta(minutes=1)
                     and flight_row['arrival_airport_code'] not in base_airports):
                 previous_solution_table_result.loc[len(previous_solution_table_result.index)] = flight_row
                 sub_index = index + 1
@@ -211,6 +183,8 @@ def flight_shift_disrupted_flights(nearest_schedule: pd.DataFrame,
         if previous_solution_id not in nearest_schedule['previous_solution_id'].values:
             continue
 
+        # print(previous_solution_id)
+
         new_arrival_time = get_time_from_table(disruptions_table, previous_solution_id, 'new_arrival_time')
         next_departure_time = get_time_from_table(nearest_schedule, previous_solution_id, 'departure_time')
 
@@ -219,6 +193,8 @@ def flight_shift_disrupted_flights(nearest_schedule: pd.DataFrame,
         aircraft_id = problematic_aircrafts[disruption_id]
 
         time_delta = next_departure_time - new_arrival_time
+        # print(next_departure_time, new_arrival_time)
+        # print(time_delta)
         # 30 минут = минимальное окно между рейсами
         if time_delta.total_seconds() < 30 * 60:
             disrupted_flights.append(
@@ -246,8 +222,8 @@ def generate_airport_pairs(previous_solution_table: pd.DataFrame) -> dict:
     flight_id_row = previous_solution_table['flight_id']
     previous_solution_id_row = previous_solution_table['previous_solution_id']
 
-    aircraft_id_row = previous_solution_table['aircraft_id'].astype(str)
-    airport_pairs_list = {aircraft_id: [] for aircraft_id in aircraft_id_row.unique()}
+    aircraft_id_row = previous_solution_table['aircraft_id'].astype(float).astype(int)
+    airport_pairs_list = {str(aircraft_id): [] for aircraft_id in aircraft_id_row.unique()}
 
     for i in range(len(previous_solution_table)):
         flight_dict = {'departure_time': departure_time_row.iloc[i],
@@ -378,12 +354,12 @@ def extract_part_from_timerange(aircraft_id: int, nearest_schedule: pd.DataFrame
     """Возвращает связку, один из полётов который попадает в указанный временной отрезок"""
     aircraft_flights = aircraft_flight_line(aircraft_id, nearest_schedule)
     for index, flight in aircraft_flights.iterrows():
-        if ((pd.to_datetime(flight['departure_time'], dayfirst=True) >= timerange[0] and pd.to_datetime(
-                flight['arrival_time'], dayfirst=True) <= timerange[1])
-                or (pd.to_datetime(flight['departure_time'], dayfirst=True) <= timerange[1] <= pd.to_datetime(
-                    flight['arrival_time'], dayfirst=True))
-                or (pd.to_datetime(flight['departure_time'], dayfirst=True) <= timerange[0] <= pd.to_datetime(
-                    flight['arrival_time'], dayfirst=True))):
+        if ((pd.to_datetime(flight['departure_time']) >= timerange[0] and pd.to_datetime(
+                flight['arrival_time']) <= timerange[1])
+                or (pd.to_datetime(flight['departure_time']) <= timerange[1] <= pd.to_datetime(
+                    flight['arrival_time']))
+                or (pd.to_datetime(flight['departure_time']) <= timerange[0] <= pd.to_datetime(
+                    flight['arrival_time']))):
             return extract_part_using_flight_id(aircraft_id, flight.to_dict(), airport_partition)
     return []
 
@@ -443,7 +419,7 @@ def remake_technical_service_table(technical_service_table: pd.DataFrame, schedu
     return technical_service_table_copy
 
 
-def allowed_time_differences(aircraft_flights: pd.DataFrame, time_size: timedelta, allowed_times: list, current_time: datetime):
+def allowed_time_differences(aircraft_flights: pd.DataFrame, time_size: timedelta, allowed_times: list, current_time: datetime, time_delta: timedelta):
     """Проверяет, есть ли необходимый диапазон времени в перерывах между переданными рейсами конкретного ВС,
     в параметр allowed_times добавляются временные промежутки когда может быть проведено ТО"""
     flag = False
@@ -460,13 +436,9 @@ def allowed_time_differences(aircraft_flights: pd.DataFrame, time_size: timedelt
             flag = True
     if len(aircraft_flights) > 0:
         last_arrival_time = pd.to_datetime(aircraft_flights['arrival_time']).iloc[-1]
-        if current_time + timedelta(days=2, hours=23, minutes=59) - last_arrival_time >= time_size:
+        if current_time + time_delta - timedelta(minutes=1) - last_arrival_time >= time_size:
             flag = True
-            allowed_times.append([last_arrival_time, current_time + timedelta(days=2, hours=23, minutes=59)])
-    if flag is False:
-        print(aircraft_flights)
-        print(time_size)
-        print(allowed_times)
+            allowed_times.append([last_arrival_time, current_time + time_delta - timedelta(minutes=1)])
     return flag
 
 
@@ -488,9 +460,9 @@ def checking_allowed_ts_time(technical_service_table: pd.DataFrame, ts_allowed_t
     # Штраф если flag = False
     if not flag:
         count = 1000
-    if count >= 1000:
-        print(ts_allowed_time)
-        print(ts_times)
+    # if count >= 1000:
+    #     print(ts_allowed_time)
+    #     print(ts_times)
     return count
 
 
@@ -517,16 +489,19 @@ def smart_swap(trigger_aircraft: int,
                aircraft_equipment_table: pd.DataFrame,
                swapped_flag: list) -> tuple:
     """Делаем swap между ВС по связкам пока не будут удовлетворены все штрафные функции"""
+    print(f'начало свопа')
     dict_of_swapped_flights = {'was_triggered': [], 'was_health': []}
     health_aircraft_info = aircraft_equipment_table[aircraft_equipment_table['aircraft_id'] == health_aircraft]
     trigger_aircraft_eq_info = \
         aircraft_equipment_table[aircraft_equipment_table['aircraft_id'] == trigger_aircraft]['equipment_id'].iloc[0]
     trigger_part = extract_part_using_flight_id(trigger_aircraft, trigger_flight_id, partition_list)
     if trigger_part == []:
+        print(f'trigger_part_empty')
         return from_partition_to_dataframe(partition_list), dict_of_swapped_flights
     trigger_timerange = extract_trigger_time_range(trigger_aircraft, trigger_flight_id, partition_list)
     health_part = extract_part_from_timerange(health_aircraft, nearest_flights, trigger_timerange, partition_list)
-    if trigger_aircraft == 12 and health_aircraft == 11:
+
+    if trigger_flight_id == {'flight_id': 'FV6721', 'aircraft_id': 2, 'previous_solution_id': 32}:
         print(trigger_part)
         print(health_part)
 
@@ -542,9 +517,11 @@ def smart_swap(trigger_aircraft: int,
 
     if (health_part == [] and (health_prev_part == [] or health_next_part == [])
             and health_aircraft_info['reserve_q'].iloc[0] is False):
+        print(f'cant move to begin/end')
         return from_partition_to_dataframe(partition_list), dict_of_swapped_flights
 
     if trigger_aircraft_eq_info == 0 and health_part != []:
+        print(f'trigger eq is 0')
         return from_partition_to_dataframe(partition_list), dict_of_swapped_flights
 
     health_equipment_flag = True
@@ -561,21 +538,32 @@ def smart_swap(trigger_aircraft: int,
             trigger_equipment_flag = False
 
     if not trigger_equipment_flag or not health_equipment_flag:
+        print(f'оборудование не подходит сразу')
         return from_partition_to_dataframe(partition_list), dict_of_swapped_flights
 
-    if (aircraft_equipment_table[aircraft_equipment_table['aircraft_id'] == trigger_aircraft]['equipment_id'].iloc[0] == 0 and health_part != []):
-        return from_partition_to_dataframe(partition_list), dict_of_swapped_flights
+    initial_partition = move_parts(trigger_aircraft, health_aircraft, trigger_part, health_part, partition_list)
+    pd_for_test = from_partition_to_dataframe(initial_partition)
+    # Проверяем штрафные функции для начальной перестановки
+    initial_flights_for_penalty = pd_for_test.loc[
+        (pd_for_test['aircraft_id'] == trigger_aircraft) |
+        (pd_for_test['aircraft_id'] == health_aircraft)]
 
-    temp_partition = move_parts(trigger_aircraft, health_aircraft, trigger_part, health_part, partition_list)
-    swapped_flag[0] = True
-    dict_of_swapped_flights['was_triggered'].append(trigger_part)
-    dict_of_swapped_flights['was_health'].append(health_part)
+    initial_flights_for_equipment_penalty = pd_for_test.loc[
+        ((pd_for_test['aircraft_id'] == health_aircraft) &
+         (pd_for_test['previous_solution_id'] == trigger_flight_id['previous_solution_id']))]
 
-    pd_for_test = from_partition_to_dataframe(temp_partition)
-    pd_trigger_for_test = pd_for_test.loc[(pd_for_test['aircraft_id'] == trigger_aircraft)]
-    pd_health_for_test = pd_for_test.loc[(pd_for_test['aircraft_id'] == health_aircraft)]
+    if penalty_function(initial_flights_for_penalty,
+                     initial_flights_for_equipment_penalty,
+                     flight_equipment_table,
+                     aircraft_equipment_table) == 0:
+        swapped_flag[0] = True
+        dict_of_swapped_flights['was_triggered'].append(trigger_part)
+        dict_of_swapped_flights['was_health'].append(health_part)
+        return pd_for_test, dict_of_swapped_flights
+    temp_partition = copy.deepcopy(initial_partition)
 
     # Сюда: добавить функцию проверки insert
+
 
     empty_prev_flag = False
     good_prev_partition = False
@@ -584,6 +572,11 @@ def smart_swap(trigger_aircraft: int,
     equipment_prev_flag = True
     equipment_next_flag = True
 
+    prev_moved = False
+    next_moved = False
+
+    temp_partition_without_check = None
+
     while True:
         trigger_prev_part = extract_next_or_previous_part(trigger_aircraft, temp_trigger_part_for_find_prev,
                                                           partition_list, 'prev')
@@ -591,6 +584,7 @@ def smart_swap(trigger_aircraft: int,
                                                          partition_list, 'prev')
         if (trigger_prev_part != [] and health_prev_part != []
                 and good_prev_partition is False and empty_prev_flag is False and equipment_prev_flag is True):
+            prev_moved = True
             temp_partition_without_check = move_parts(trigger_aircraft, health_aircraft, trigger_prev_part,
                                                       health_prev_part, temp_partition)
 
@@ -630,8 +624,12 @@ def smart_swap(trigger_aircraft: int,
                 temp_health_part_for_find_prev = health_prev_part
                 dict_of_swapped_flights['was_triggered'].append(trigger_prev_part)
                 dict_of_swapped_flights['was_health'].append(health_prev_part)
-        elif trigger_prev_part == [] or health_prev_part == []:
+        # elif trigger_prev_part == [] or health_prev_part == []:
+        #     empty_prev_flag = True
+        elif (trigger_prev_part == [] and health_prev_part == []):
             empty_prev_flag = True
+        else:
+            prev_moved = False
 
         trigger_next_part = extract_next_or_previous_part(trigger_aircraft, temp_trigger_part_for_find_next,
                                                           partition_list, 'next')
@@ -639,9 +637,9 @@ def smart_swap(trigger_aircraft: int,
                                                          partition_list, 'next')
         if (trigger_next_part != [] and health_next_part != []
                 and good_next_partition is False and empty_next_flag is False and equipment_next_flag is True):
+            next_moved = True
             temp_partition_without_check = move_parts(trigger_aircraft, health_aircraft, trigger_next_part,
                                                       health_next_part, temp_partition)
-
             pd_for_test = from_partition_to_dataframe(temp_partition_without_check)
             pd_trigger_for_test = pd_for_test.loc[(pd_for_test['aircraft_id'] == trigger_aircraft)]
             pd_health_for_test = pd_for_test.loc[(pd_for_test['aircraft_id'] == health_aircraft)]
@@ -669,19 +667,34 @@ def smart_swap(trigger_aircraft: int,
                 temp_partition = temp_partition_without_check
                 temp_trigger_part_for_find_next = trigger_next_part
                 temp_health_part_for_find_next = health_next_part
-                dict_of_swapped_flights['was_triggered'].append(trigger_prev_part)
-                dict_of_swapped_flights['was_health'].append(health_prev_part)
+                dict_of_swapped_flights['was_triggered'].append(trigger_next_part)
+                dict_of_swapped_flights['was_health'].append(health_next_part)
             if next_penalty_flag:
                 good_next_partition = True
                 temp_partition = temp_partition_without_check
                 temp_trigger_part_for_find_next = trigger_next_part
                 temp_health_part_for_find_next = health_next_part
-                dict_of_swapped_flights['was_triggered'].append(trigger_prev_part)
-                dict_of_swapped_flights['was_health'].append(health_prev_part)
-        elif trigger_next_part == [] or health_next_part == []:
+                dict_of_swapped_flights['was_triggered'].append(trigger_next_part)
+                dict_of_swapped_flights['was_health'].append(health_next_part)
+        elif trigger_next_part == [] and health_next_part == []:
             empty_next_flag = True
+        else:
+            next_moved = False
+            # if temp_partition_without_check is not None:
+            #     temp_partition = temp_partition_without_check
+            #     dict_of_swapped_flights['was_triggered'].append(trigger_next_part)
+            #     dict_of_swapped_flights['was_health'].append(health_next_part)
 
-        if not equipment_next_flag or not equipment_prev_flag:
+        # print(trigger_next_part)
+        # print(health_next_part)
+        # print(good_next_partition)
+        # print(empty_next_flag)
+        # print(equipment_next_flag)
+
+        if not prev_moved and not next_moved:
+            break
+
+        if not equipment_next_flag and not equipment_prev_flag:
             break
 
         if good_next_partition and good_prev_partition:
@@ -693,6 +706,13 @@ def smart_swap(trigger_aircraft: int,
         if (good_prev_partition is True and empty_next_flag is True) or (
                 good_next_partition is True and empty_prev_flag is True):
             break
+    if trigger_flight_id == {'flight_id': 'FV6721', 'aircraft_id': 2, 'previous_solution_id': 32}:
+        print('FV6721')
+        print(trigger_next_part)
+        print(health_next_part)
+        print(good_next_partition)
+        print(empty_next_flag)
+        print(equipment_next_flag)
     print(f'swapped')
     return from_partition_to_dataframe(temp_partition), dict_of_swapped_flights
 
@@ -887,7 +907,8 @@ def schedule_differences(previous_schedule: pd.DataFrame, new_schedule: pd.DataF
 def ts_time_shifts(new_schedule: pd.DataFrame,
                    technical_service_table: pd.DataFrame,
                    aircraft_equipment_table: pd.DataFrame,
-                   current_time: datetime) -> int:
+                   current_time: datetime,
+                   time_delta: timedelta) -> int:
     """Суммарное количество сдвинутых ТО -> min"""
     technical_service_aircraft_ids = technical_service_table['aircraft_id'].unique().tolist()
     summary_count = 0
@@ -904,14 +925,14 @@ def ts_time_shifts(new_schedule: pd.DataFrame,
         for technical_service_id in technical_service_ids:
             time_size = aircraft_ts[aircraft_ts['technical_service_id'] == technical_service_id]['time_size'].iloc[0]
             time_size = pd.to_timedelta(time_size)
-            if not allowed_time_differences(aircraft_flights, time_size, ts_allowed_time, current_time):
+            if not allowed_time_differences(aircraft_flights, time_size, ts_allowed_time, current_time, time_delta):
                 # Штраф за невозможность проведения ТО
-                print(f'TS trouble with aircraft {aircraft_id} (can not do ts)')
+                # print(f'TS trouble with aircraft {aircraft_id} (can not do ts)')
                 summary_count += 1000
             else:
                 count = checking_allowed_ts_time(technical_service_table, ts_allowed_time, ts_used_time)
-                if count >= 1000:
-                    print(f'TS trouble with aircraft {aircraft_id}')
+                # if count >= 1000:
+                #     print(f'TS trouble with aircraft {aircraft_id}')
                 summary_count += count
     # print(f'Count of moved TS is {summary_count}')
     return summary_count
@@ -932,7 +953,7 @@ def schedule_time_checker(new_schedule: pd.DataFrame, aircraft_equipment_table: 
             next_departure_time = aircraft_flights['departure_time'].iloc[index + 1]
             if (pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds() < 30 * 60:
                 flag = False
-                # # print(f'Bad timedelta is {(pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds()}')
+                # print(f'Bad timedelta is {(pd.to_datetime(next_departure_time) - pd.to_datetime(arrival_time)).total_seconds()}')
                 print(
                     f'Now checking {pd.to_datetime(arrival_time)} and {pd.to_datetime(next_departure_time)} for aircraft {aircraft_id}')
             # print(f'Time checker is {flag}')
@@ -957,7 +978,7 @@ def airports_checker(new_schedule: pd.DataFrame, aircraft_equipment_table: pd.Da
             next_departure_airport = aircraft_flight['departure_airport_code'].iloc[index + 1]
             if arrival_airport != next_departure_airport:
                 flag = False
-                print(f'Airports checker {aircraft_id} is {flag}')
+                # print(f'Airports checker {aircraft_id} is {flag}')
     return flag
 
 
@@ -979,8 +1000,8 @@ def equipment_checker(new_schedule: pd.DataFrame,
             flight_equipment = list(ast.literal_eval(flight_equipment))
             if aircraft_equipment not in flight_equipment:
                 flag = False
-                print(
-                    f'Now checking aircraft {aircraft_id} with {aircraft_equipment} and flight {flight_id} with eqipment {flight_equipment}')
+                # print(
+                #     f'Now checking aircraft {aircraft_id} with {aircraft_equipment} and flight {flight_id} with eqipment {flight_equipment}')
         # print(f'Equipment checker is {flag}')
 
     return flag
@@ -1017,209 +1038,25 @@ def objective_function(previous_schedule: pd.DataFrame,
                        flight_equipment_table: pd.DataFrame,
                        aircraft_equipment_table: pd.DataFrame,
                        technical_service_table: pd.DataFrame,
-                       current_time: datetime) -> int:
+                       current_time: datetime,
+                       time_delta: timedelta) -> int:
     return (schedule_differences(previous_schedule, new_schedule)
-            + ts_time_shifts(new_schedule, technical_service_table, aircraft_equipment_table, current_time)
+            # + ts_time_shifts(new_schedule, technical_service_table, aircraft_equipment_table, current_time, time_delta)
             + penalty_function(schedule_part_for_penalty, schedule_part_for_equipment_penalty, flight_equipment_table,
                                aircraft_equipment_table))
 
 
-# def list_based_sa_algorithm(temperature_list: list,
-#                             max_iteration_times: int,
-#                             markov_chain_length: int,
-#                             equipment_disruption_table: pd.DataFrame,
-#                             time_shift_disruption_table: pd.DataFrame,
-#                             previous_schedule: pd.DataFrame,
-#                             flight_equipments_table: pd.DataFrame,
-#                             aircraft_table: pd.DataFrame,
-#                             technical_service_table,
-#                             current_time: datetime) -> int:
-#     outer_loop_iterator = 0
-#
-#     # В текущем расписании обновили время взлета и посадки рейсов в соответствии с disruption-таблицей переноса рейсов
-#     updated_previous_solution = change_disrupted_flights_time(time_shift_disruption_table, previous_schedule, 0, 1, 2,
-#                                                               3)
-#     # В измененном текущем расписании выбрали ближайшие 3 дня
-#     nearest_flights = nearest_flights_selection(updated_previous_solution, current_time, 'KJA', 'LED')
-#     nearest_flights.to_csv('csv_files/new_schedule_NEARST.csv', index=False, sep=';')
-#     # Извлекаем из таблицы тех обслуживания строки, попадающие в нужный диапазон времени
-#     technical_service_table = remake_technical_service_table(technical_service_table, nearest_flights)
-#     # Текущее решение = ближайшие 3 дня из расписания
-#     current_solution = nearest_flights
-#
-#     # Вычисляем objective function для текущего расписания
-#     current_solution_objective_func = objective_function(current_solution,
-#                                                          current_solution,
-#                                                          current_solution,
-#                                                          current_solution,
-#                                                          flight_equipments_table,
-#                                                          aircraft_table,
-#                                                          technical_service_table)
-#     print(f'Begin with objective function = {current_solution_objective_func}')
-#     # result_list = []
-#     probability_list = []
-#     exponent_list = []
-#     # temperature_list_for_plot = []
-#     # objective_functions_list = []
-#     start = time.time()
-#
-#     while outer_loop_iterator <= max_iteration_times:
-#         temperature_max = max(temperature_list)
-#         # temperature_list_for_plot.append(temperature_max)
-#         outer_loop_iterator += 1
-#         temperature = 0
-#         bad_solution_count, inner_loop_iterator = 0, 0
-#         while inner_loop_iterator <= markov_chain_length:
-#             # Случайно выбрать 2 ВС и случайно выбрать flight_id для триггерного ВС,
-#             # сделать новое расписание через swap
-#
-#             # Создали словарь, где ключи - ВС с триггером, значения - рейсы которые не могут быть выполнены
-#             trigger_aircraft_and_flight_dict = all_trigger_aircraft_and_flight(equipment_disruption_table,
-#                                                                                time_shift_disruption_table,
-#                                                                                flight_equipments_table,
-#                                                                                nearest_flights,
-#                                                                                current_time)
-#
-#             # Сделали список со всеми триггерными ВС
-#             # trigger_aircraft_ids = list(trigger_aircraft_and_flight_dict.keys())
-#
-#             # Случайно выбрали триггерное ВС и рейс для него
-#             trigger_aircraft, trigger_flight_id = aircraft_and_flight_random_choice(trigger_aircraft_and_flight_dict)
-#             # Случайно выбрали второе ВС для перестановки
-#             aircraft_to_swap = aircraft_for_swap_random_choice(aircraft_table, trigger_aircraft)
-#             # Сделали разбиение текущего расписание на связки
-#             current_schedule_partition = base_airports_partition(current_solution, 'KJA', 'LED')
-#
-#             print(
-#                 f'Now iteration with trigger aircraft {trigger_aircraft}, flight {trigger_flight_id}, second aircraft {aircraft_to_swap}')
-#
-#             current_flights_for_penalty = current_solution.loc[
-#                 (current_solution['aircraft_id'] == trigger_aircraft)
-#                 | (current_solution['aircraft_id'] == aircraft_to_swap)]
-#
-#             current_flights_for_equipment_penalty = current_solution.loc[
-#                 ((current_solution['aircraft_id'] == trigger_aircraft)
-#                  & (current_solution['flight_id'] == trigger_flight_id['flight_id'])
-#                  & (current_solution['previous_solution_id'] == trigger_flight_id['previous_solution_id']))]
-#
-#             objective_function_before_swap = objective_function(nearest_flights,
-#                                                                 current_solution,
-#                                                                 current_flights_for_penalty,
-#                                                                 current_flights_for_equipment_penalty,
-#                                                                 flight_equipments_table,
-#                                                                 aircraft_table,
-#                                                                 technical_service_table)
-#
-#             print(f'Objective function before swap for 2 aircrafts {objective_function_before_swap}')
-#
-#             swapped_flag = [False]
-#             # С помощью smart_swap сделали candidate_solution
-#             candidate_solution = smart_swap(trigger_aircraft,
-#                                             aircraft_to_swap,
-#                                             current_schedule_partition,
-#                                             nearest_flights,
-#                                             trigger_flight_id,
-#                                             flight_equipments_table,
-#                                             aircraft_table,
-#                                             swapped_flag)
-#
-#             inner_loop_iterator += 1
-#
-#             candidate_flights_for_penalty_swapped = candidate_solution.loc[
-#                 ((candidate_solution['aircraft_id'] == trigger_aircraft)
-#                  | (candidate_solution['aircraft_id'] == aircraft_to_swap))]
-#
-#             if swapped_flag[0]:
-#                 swapped_aircraft = aircraft_to_swap
-#             else:
-#                 swapped_aircraft = trigger_aircraft
-#
-#             candidate_flights_for_equipment_penalty_swapped = candidate_solution.loc[
-#                 ((candidate_solution['aircraft_id'] == swapped_aircraft)
-#                  & (candidate_solution['previous_solution_id'] == trigger_flight_id['previous_solution_id']))]
-#
-#             objective_function_after_swap = objective_function(nearest_flights,
-#                                                                candidate_solution,
-#                                                                candidate_flights_for_penalty_swapped,
-#                                                                candidate_flights_for_equipment_penalty_swapped,
-#                                                                flight_equipments_table,
-#                                                                aircraft_table,
-#                                                                technical_service_table)
-#             print(f'Objective function after swap for 2 aircrafts {objective_function_after_swap}')
-#
-#             # Вычисляем objective function для нового расписания(сделали smart_swap)
-#             candidate_solution_objective_func = (current_solution_objective_func
-#                                                  - objective_function_before_swap
-#                                                  + objective_function_after_swap)
-#
-#             print(
-#                 f'Now iteration {outer_loop_iterator}, {inner_loop_iterator}. Chosen trigger aircraft: {trigger_aircraft}, trigger flight: {trigger_flight_id}, second aircraft: {aircraft_to_swap}, current OF {current_solution_objective_func}, candidate OF {candidate_solution_objective_func}')
-#
-#             if 0 < candidate_solution_objective_func < current_solution_objective_func:
-#                 current_solution = candidate_solution
-#                 # Вычисляем objective function для текущего расписания
-#                 current_solution_objective_func = objective_function(nearest_flights,
-#                                                                      current_solution,
-#                                                                      current_solution,
-#                                                                      current_solution,
-#                                                                      flight_equipments_table,
-#                                                                      aircraft_table,
-#                                                                      technical_service_table)
-#                 print(f'Found better solution {current_solution_objective_func}')
-#                 current_solution.to_csv('csv_files/new_schedule_RESULT_' + str(outer_loop_iterator)
-#                                         + '_' + str(inner_loop_iterator) + '.csv', index=False, sep=';')
-#                 probability = 1
-#             else:
-#                 safe_temperature_max = max(temperature_max, 1e-10)
-#                 exponent = -(candidate_solution_objective_func - current_solution_objective_func) / safe_temperature_max
-#                 exponent_list.append(exponent)
-#                 probability = math.exp(exponent)
-#                 random_float = random.random()
-#                 if random_float < probability:
-#                     # когда temperature == 0 и candidate_solution_distance_sum == current_solution_distance_sum получается число меньшее 1e-10
-#                     temperature = max(
-#                         (temperature - candidate_solution_objective_func + current_solution_objective_func) / math.log(
-#                             random_float), 1e-10)
-#                     # temperature_list_for_plot.append(temperature_max)
-#
-#                     # if temperature == 1e-10:
-#                     #     print(prev_temp, candidate_solution_distance_sum - current_solution_distance_sum, math.log(random_float))
-#
-#                     bad_solution_count += 1
-#                     current_solution = candidate_solution
-#                     # Вычисляем objective function для текущего расписания
-#                     current_solution_objective_func = objective_function(nearest_flights,
-#                                                                          current_solution,
-#                                                                          current_solution,
-#                                                                          current_solution,
-#                                                                          flight_equipments_table,
-#                                                                          aircraft_table,
-#                                                                          technical_service_table)
-#                     print(f'Randomly found better solution {current_solution_objective_func}')
-#                     # current_solution.to_csv('csv_files/new_schedule_RANDOM_RESULT_' + str(outer_loop_iterator)
-#                     #                         + '_' + str(inner_loop_iterator) + '.csv', index=False, sep=';')
-#                 else:
-#                     pass
-#             # objective_functions_list.append(current_solution_distance_sum)
-#             probability_list.append(probability)
-#             # result_list.append(calculate_distance_of_permutation(current_solution))
-#
-#         if bad_solution_count != 0:
-#             temperature_list.remove(temperature_max)
-#             # temperature_list_for_plot.append(temperature_max)
-#             temperature_list.append(temperature / bad_solution_count)
-#
-#     # print(probability_list)
-#     # plt.plot(range(5000), temperature_list_for_plot[:5000])
-#     # plt.plot(range(5000), objective_functions_list[:5000])
-#     plt.plot(range(max_iteration_times), probability_list[:max_iteration_times])
-#     # plt.plot(range(max_iteration_times*markov_chain_length), result_list[:max_iteration_times*markov_chain_length])
-#     # plt.plot(range(30), exponent_list[:30])
-#     plt.plot()
-#     plt.show()
-#     print(time.time() - start)
-#     current_solution.to_csv('csv_files/new_schedule_RESULT.csv', index=False, sep=';')
-#     return current_solution_objective_func
+def save_dict_of_swapped_to_json(dict_with_ids: dict, file_name: str):
+    dict_for_json = {k: list(v) for k, v in dict_with_ids.items()}
+    with open(file_name, 'w', encoding='utf-8') as file:
+        json.dump(dict_for_json, file, indent=4)
+
+
+def dict_of_swapped_from_json(file_name: str) -> dict:
+    with open(file_name, 'r', encoding='utf-8') as file:
+        dict_of_ids = json.load(file)
+    dict_of_ids = {k: list(v) for k, v in dict_of_ids.items()}
+    return dict_of_ids
 
 
 def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
@@ -1228,10 +1065,14 @@ def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
                                  flight_equipments_table: pd.DataFrame,
                                  aircraft_table: pd.DataFrame,
                                  technical_service_table,
-                                 current_time: datetime) -> tuple:
+                                 current_time: datetime,
+                                 time_delta: timedelta,
+                                 nearest_file_name: str,
+                                 result_file_name: str,
+                                 result_dict_file: str) -> tuple:
     # В измененном текущем расписании выбрали ближайшие 3 дня
-    nearest_flights = nearest_flights_selection(previous_schedule, current_time, 'KJA', 'LED')
-    nearest_flights.to_csv('csv_files/new_schedule_NEARST.csv', index=False, sep=';')
+    nearest_flights = nearest_flights_selection(previous_schedule, current_time, time_delta, 'KJA', 'LED')
+    nearest_flights.to_csv(nearest_file_name, index=False, sep=';')
     first_partition = base_airports_partition(nearest_flights, 'KJA', 'LED')
     # Извлекаем из таблицы тех обслуживания строки, попадающие в нужный диапазон времени
     technical_service_table = remake_technical_service_table(technical_service_table, nearest_flights)
@@ -1246,7 +1087,8 @@ def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
                                                          flight_equipments_table,
                                                          aircraft_table,
                                                          technical_service_table,
-                                                         current_time)
+                                                         current_time,
+                                                         time_delta)
     print(f'Begin with objective function = {current_solution_objective_func}')
 
     # Создали словарь, где ключи - ВС с триггером, значения - рейсы которые не могут быть выполнены
@@ -1255,6 +1097,7 @@ def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
                                                                        flight_equipments_table,
                                                                        nearest_flights,
                                                                        current_time)
+    print(trigger_aircraft_and_flight_dict)
     # Сделали список со всеми триггерными ВС
     trigger_aircraft_ids = list(trigger_aircraft_and_flight_dict.keys())
 
@@ -1307,7 +1150,8 @@ def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
                                                                             flight_equipments_table,
                                                                             aircraft_table,
                                                                             technical_service_table,
-                                                                            current_time)
+                                                                            current_time,
+                                                                            time_delta)
 
                         print(f'Objective function before swap for 2 aircrafts {objective_function_before_swap}')
 
@@ -1317,7 +1161,7 @@ def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
                         candidate_solution, candidate_dict_of_swapped_flag = smart_swap(trigger_aircraft,
                                                                                         aircraft_to_swap,
                                                                                         current_schedule_partition,
-                                                                                        nearest_flights,
+                                                                                        temp_current,
                                                                                         flight_id,
                                                                                         flight_equipments_table,
                                                                                         aircraft_table,
@@ -1343,7 +1187,8 @@ def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
                                                                            flight_equipments_table,
                                                                            aircraft_table,
                                                                            technical_service_table,
-                                                                           current_time)
+                                                                           current_time,
+                                                                           time_delta)
 
                         print(f'Objective function after swap for 2 aircrafts {objective_function_after_swap}')
 
@@ -1362,8 +1207,8 @@ def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
                             temp_dict_of_swapped_flights = candidate_dict_of_swapped_flag
                             print(
                                 f'Found better schedule with objective function = {temp_current_solution_objective_func}. Save to file {count}')
-                            temp_current.to_csv('csv_files/new_schedule_RESULT_' + str(count) + '.csv', index=False,
-                                                sep=';')
+                            # temp_current.to_csv('csv_files/new_schedule_RESULT_' + str(count) + '.csv', index=False,
+                            #                     sep=';')
                             count += 1
             if flight_id['previous_solution_id'] in current_trigger_aircraft_flights:
                 list_for_flights_check.remove(flight_id)
@@ -1375,58 +1220,169 @@ def local_optimisation_algorithm(equipment_disruption_table: pd.DataFrame,
                                                                  flight_equipments_table,
                                                                  aircraft_table,
                                                                  technical_service_table,
-                                                                 current_time)
+                                                                 current_time,
+                                                                 time_delta)
             dict_of_all_swapped_flights['was_triggered'].extend(temp_dict_of_swapped_flights['was_triggered'])
             dict_of_all_swapped_flights['was_health'].extend(temp_dict_of_swapped_flights['was_health'])
-    current_solution.to_csv('csv_files/new_schedule_RESULT.csv', index=False, sep=';')
-    print(list_for_flights_check)
+    current_solution.to_csv(result_file_name, index=False, sep=';')
     print(time.time() - start)
     dict_of_all_swapped_flights = {
-        'was_triggered': set([d['previous_solution_id'] for sublist in dict_of_all_swapped_flights.get('was_triggered', []) for d in sublist if
-                          'previous_solution_id' in d]),
-        'was_health': set([d['previous_solution_id'] for sublist in dict_of_all_swapped_flights.get('was_health', []) for d in sublist if
-                       'previous_solution_id' in d])
+        'was_triggered': [[d['previous_solution_id'] for d in sublist] for sublist in dict_of_all_swapped_flights.get('was_triggered', []) if sublist != []],
+        'was_health': [[d['previous_solution_id'] for d in sublist] for sublist in dict_of_all_swapped_flights.get('was_health', []) if sublist != []]
     }
     print(f'Переставленные рейсы {dict_of_all_swapped_flights}')
+    save_dict_of_swapped_to_json(dict_of_all_swapped_flights, result_dict_file)
     return current_solution_objective_func, dict_of_all_swapped_flights
 
 
 """Создаем данные для алгоритма"""
-"""Тест 1"""
+
+test_number = int(input('Enter test number: '))
+
+"""ТЕСТЫ"""
+
+if test_number == 1:
+    """Тест 1"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_1/df_aircraft_with_spare_test_1.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_1/df_problematic_aircraft_equipment_test_1.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_1/df_problematic_flight_shift_test_1.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 22, 0, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=3)
+
+    result_file_name = 'test_1/new_schedule_RESULT_test_1.csv'
+    nearest_file_name = 'test_1/NEAREST_schedule_test_1.csv'
+    dict_file = 'test_1/dict_of_swapped_test_1.json'
+
+if test_number == 2:
+    """Тест 2"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_2/df_aircraft_with_spare_test_2.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_2/df_problematic_aircraft_equipment_test_2.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_2/df_problematic_flight_shift_test_2.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 21, 0, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=3)
+
+    result_file_name = 'test_2/new_schedule_RESULT_test_2.csv'
+    nearest_file_name = 'test_2/NEAREST_schedule_test_2.csv'
+    dict_file = 'test_2/dict_of_swapped_test_2.json'
+
+if test_number == 3:
+    """Тест 3"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_3/df_aircraft_with_spare_test_3.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_3/df_problematic_aircraft_equipment_test_3.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_3/df_problematic_flight_shift_test_3.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 23, 12, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=3)
+
+    result_file_name = 'test_3/new_schedule_RESULT_test_3.csv'
+    nearest_file_name = 'test_3/NEAREST_schedule_test_3.csv'
+    dict_file = 'test_3/dict_of_swapped_test_3.json'
+
+if test_number == 4:
+    """Тест 4"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_4/df_aircraft_with_spare_test_4.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_4/df_problematic_aircraft_equipment_test_4.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_4/df_problematic_flight_shift_test_4.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 23, 0, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=3)
+
+    result_file_name = 'test_4/new_schedule_RESULT_test_4.csv'
+    nearest_file_name = 'test_4/NEAREST_schedule_test_4.csv'
+    dict_file = 'test_4/dict_of_swapped_test_4.json'
+
+if test_number == 5:
+    """Тест 5"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_5/df_aircraft.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_5/df_problematic_aircraft_equipment.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_5/df_problematic_flight_shift.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 23, 0, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=2, hours=12)
+
+    result_file_name = 'test_5/new_schedule_RESULT_test_5.csv'
+    nearest_file_name = 'test_5/NEAREST_schedule_test_5.csv'
+    dict_file = 'test_5/dict_of_swapped_test_5.json'
+
+
+"""Общие данные для всех тестов"""
+# авиарейсы
+flights = pd.read_csv('test_5/df_flights.csv', sep=';')
+# требования к вс на рейсе
+flight_equipments = pd.read_csv('test_5/df_flight_equipments.csv', sep=';')
+# текущее распределение вс на рейсы
+previous_solution = pd.read_csv('test_5/df_previous_solution.csv', sep=';')
+previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+# тех обслуживание вс
+technical_service = pd.read_csv('test_5/df_technical_service.csv', sep=';')
 # DataFrame со списком disruptions по смене оборудования ВС
 table_with_equipment_disruptions = problematic_aircraft_equipment
 # DataFrame со списком disruptions по переносу времени рейсов
 table_with_flight_shift_disruptions = problematic_flight_shift
 # Предыдущее решение, которое было до disruptions
 previous_schedule = change_disrupted_flights_time(table_with_flight_shift_disruptions,
-                                                                              previous_solution,
-                                                                              ['KJA', 'LED'],
-                                                                              0, 1, 2, 3)
+                                                  previous_solution,
+                                                  ['KJA', 'LED'])
 # Таблица с необходимым оборудованием для каждого рейса
 table_with_flight_equipments_info = flight_equipments
 # Таблица с данными по оборудованию каждого ВС
 table_with_aircraft_equipment_info = updated_aircraft_with_spare
 # Таблица с данными по ТО
 table_with_technical_service_info = technical_service
-# Текущий момент времени
-test_1_curr_time = datetime(2025, 1, 22, 0, 0)
-test_2_curr_time = datetime(2025, 1, 21, 0, 0)
-test_3_curr_time = datetime(2025, 1, 23, 12, 0)
 
-# result_schedule, dict_of_swapped = local_optimisation_algorithm(table_with_equipment_disruptions,
-#                                                                 table_with_flight_shift_disruptions,
-#                                                                 previous_schedule,
-#                                                                 table_with_flight_equipments_info,
-#                                                                 table_with_aircraft_equipment_info,
-#                                                                 table_with_technical_service_info,
-#                                                                 test_3_curr_time)
-# dict_of_swapped = {'was_triggered': [10, 11, 54, 55, 57, 58, 59, 60, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 205, 206], 'was_health': []}
 
-nearest = nearest_flights_selection(previous_schedule, test_3_curr_time, 'KJA', 'LED')
-gantt_chart(nearest, {'was_triggered': {292, 293, 294, 295, 54, 55, 57, 58, 59, 60, 61, 62, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 205, 206, 101, 102, 103, 104, 105, 106, 111, 112}, 'was_health': set()}, True)
+result_schedule, dict_of_swapped = local_optimisation_algorithm(table_with_equipment_disruptions,
+                                                                table_with_flight_shift_disruptions,
+                                                                previous_schedule,
+                                                                table_with_flight_equipments_info,
+                                                                table_with_aircraft_equipment_info,
+                                                                table_with_technical_service_info,
+                                                                test_time,
+                                                                time_delta,
+                                                                nearest_file_name,
+                                                                result_file_name,
+                                                                dict_file)
 
-result = pd.read_csv('csv_files/new_schedule_RESULT.csv', sep=';')
-gantt_chart(result, {'was_triggered': {292, 293, 294, 295, 54, 55, 57, 58, 59, 60, 61, 62, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 205, 206, 101, 102, 103, 104, 105, 106, 111, 112}, 'was_health': set()}, True)
+# dict_of_swapped = dict_of_swapped_from_json('test_4/dict_of_swapped_test_4.json')
+
+nearest = pd.read_csv(nearest_file_name, sep=';')
+gantt_chart(nearest, dict_of_swapped, True)
+
+result = pd.read_csv(result_file_name, sep=';')
+gantt_chart(result, dict_of_swapped, True)
 
 ts = remake_technical_service_table(table_with_technical_service_info, nearest)
 part = base_airports_partition(nearest, 'KJA', 'LED')
@@ -1444,32 +1400,9 @@ f = [False]
 # print(objective_function(nearest, after_swap, current_flights_for_penalty, current_flights_for_equipment_penalty, table_with_flight_equipments_info, table_with_aircraft_equipment_info, ts))
 
 
-# t = pd.read_csv('csv_files/t1.csv', sep=';')
-# t_part = base_airports_partition(t, 'KJA', 'LED')
-# print(t_part)
-#
-# print(from_partition_to_dataframe(t_part))
-#
-# from_partition_to_dataframe(t_part).to_csv('csv_files/t2.csv', index=False, sep=';')
-
-
 print(objective_function(nearest, nearest, nearest, nearest, table_with_flight_equipments_info,
-                         table_with_aircraft_equipment_info, ts, test_3_curr_time))
+                         table_with_aircraft_equipment_info, ts, test_time, time_delta))
 
 print(objective_function(nearest, result, result, result, table_with_flight_equipments_info,
-                         table_with_aircraft_equipment_info, ts, test_3_curr_time))
+                         table_with_aircraft_equipment_info, ts, test_time, time_delta))
 
-# print(f)
-
-# #
-# after_swap = smart_swap(9, 18, part, nearest, {'flight_id': 'FV6342', 'aircraft_id': 9, 'previous_solution_id': 206}, flight_equipments, updated_aircraft)
-# after_swap.to_csv('csv_files/test.csv', index=False, sep=';')
-# test = from_partition_to_dataframe(part)
-# test.to_csv('csv_files/test.csv', index=False, sep=";")
-
-
-# updated_previous_solution = change_disrupted_flights_time(table_with_flight_shift_disruptions, previous_schedule, 0, 1, 2, 3)
-# nearest_flights = nearest_flights_selection(updated_previous_solution, curr_time, 'KJA', 'LED')
-# parts = base_airports_partition(updated_previous_solution, 'KJA', 'LED')
-
-# print(smart_swap(12, 11, parts, nearest_flights, [3, 12], {'flight_id': 'FV6234', 'aircraft_id': 12, 'previous_solution_id': 295}, table_with_flight_equipments_info, table_with_aircraft_equipment_info))
