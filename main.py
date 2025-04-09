@@ -182,23 +182,23 @@ def flight_shift_disrupted_flights(nearest_schedule: pd.DataFrame,
             'previous_solution_id'].iloc[0]
         if previous_solution_id not in nearest_schedule['previous_solution_id'].values:
             continue
-
-        # print(previous_solution_id)
-
-        new_arrival_time = get_time_from_table(disruptions_table, previous_solution_id, 'new_arrival_time')
-        next_departure_time = get_time_from_table(nearest_schedule, previous_solution_id, 'departure_time')
-
-        flight_id = nearest_schedule[nearest_schedule['previous_solution_id'] == previous_solution_id][
-            'flight_id'].iloc[0]
         aircraft_id = problematic_aircrafts[disruption_id]
 
-        time_delta = next_departure_time - new_arrival_time
-        # print(next_departure_time, new_arrival_time)
-        # print(time_delta)
-        # 30 минут = минимальное окно между рейсами
-        if time_delta.total_seconds() < 30 * 60:
-            disrupted_flights.append(
-                {'flight_id': flight_id, 'aircraft_id': aircraft_id, 'previous_solution_id': int(previous_solution_id)})
+        # print(previous_solution_id)
+        if previous_solution_id + 1 in nearest_schedule['previous_solution_id'].tolist():
+            new_arrival_time = get_time_from_table(disruptions_table, previous_solution_id, 'new_arrival_time')
+            next_departure_time = get_time_from_table(nearest_schedule, previous_solution_id, 'departure_time')
+
+            flight_id = nearest_schedule[nearest_schedule['previous_solution_id'] == previous_solution_id][
+                'flight_id'].iloc[0]
+
+            time_delta = next_departure_time - new_arrival_time
+            # print(next_departure_time, new_arrival_time)
+            # print(time_delta)
+            # 30 минут = минимальное окно между рейсами
+            if time_delta.total_seconds() < 30 * 60:
+                disrupted_flights.append(
+                    {'flight_id': flight_id, 'aircraft_id': aircraft_id, 'previous_solution_id': int(previous_solution_id)})
 
     return disrupted_flights
 
@@ -490,6 +490,9 @@ def smart_swap(trigger_aircraft: int,
                swapped_flag: list) -> tuple:
     """Делаем swap между ВС по связкам пока не будут удовлетворены все штрафные функции"""
     print(f'начало свопа')
+    max_iterations = 30
+    iteration_count = 0
+
     dict_of_swapped_flights = {'was_triggered': [], 'was_health': []}
     health_aircraft_info = aircraft_equipment_table[aircraft_equipment_table['aircraft_id'] == health_aircraft]
     trigger_aircraft_eq_info = \
@@ -552,18 +555,16 @@ def smart_swap(trigger_aircraft: int,
         ((pd_for_test['aircraft_id'] == health_aircraft) &
          (pd_for_test['previous_solution_id'] == trigger_flight_id['previous_solution_id']))]
 
+    dict_of_swapped_flights['was_triggered'].append(trigger_part)
+    dict_of_swapped_flights['was_health'].append(health_part)
+
     if penalty_function(initial_flights_for_penalty,
                      initial_flights_for_equipment_penalty,
                      flight_equipment_table,
                      aircraft_equipment_table) == 0:
         swapped_flag[0] = True
-        dict_of_swapped_flights['was_triggered'].append(trigger_part)
-        dict_of_swapped_flights['was_health'].append(health_part)
         return pd_for_test, dict_of_swapped_flights
     temp_partition = copy.deepcopy(initial_partition)
-
-    # Сюда: добавить функцию проверки insert
-
 
     empty_prev_flag = False
     good_prev_partition = False
@@ -578,6 +579,7 @@ def smart_swap(trigger_aircraft: int,
     temp_partition_without_check = None
 
     while True:
+        iteration_count += 1
         trigger_prev_part = extract_next_or_previous_part(trigger_aircraft, temp_trigger_part_for_find_prev,
                                                           partition_list, 'prev')
         health_prev_part = extract_next_or_previous_part(health_aircraft, temp_health_part_for_find_prev,
@@ -611,13 +613,13 @@ def smart_swap(trigger_aircraft: int,
                                                                  'prev',
                                                                  flight_equipment_table,
                                                                  aircraft_equipment_table))
-            if equipment_prev_flag:
-                temp_partition = temp_partition_without_check
-                temp_trigger_part_for_find_prev = trigger_prev_part
-                temp_health_part_for_find_prev = health_prev_part
-                dict_of_swapped_flights['was_triggered'].append(trigger_prev_part)
-                dict_of_swapped_flights['was_health'].append(health_prev_part)
-            if prev_penalty_flag:
+            # if equipment_prev_flag:
+            #     temp_partition = temp_partition_without_check
+            #     temp_trigger_part_for_find_prev = trigger_prev_part
+            #     temp_health_part_for_find_prev = health_prev_part
+            #     dict_of_swapped_flights['was_triggered'].append(trigger_prev_part)
+            #     dict_of_swapped_flights['was_health'].append(health_prev_part)
+            if prev_penalty_flag and equipment_prev_flag:
                 good_prev_partition = True
                 temp_partition = temp_partition_without_check
                 temp_trigger_part_for_find_prev = trigger_prev_part
@@ -663,13 +665,13 @@ def smart_swap(trigger_aircraft: int,
                                                                  'next',
                                                                  flight_equipment_table,
                                                                  aircraft_equipment_table))
-            if equipment_next_flag:
-                temp_partition = temp_partition_without_check
-                temp_trigger_part_for_find_next = trigger_next_part
-                temp_health_part_for_find_next = health_next_part
-                dict_of_swapped_flights['was_triggered'].append(trigger_next_part)
-                dict_of_swapped_flights['was_health'].append(health_next_part)
-            if next_penalty_flag:
+            # if equipment_next_flag:
+            #     temp_partition = temp_partition_without_check
+            #     temp_trigger_part_for_find_next = trigger_next_part
+            #     temp_health_part_for_find_next = health_next_part
+            #     dict_of_swapped_flights['was_triggered'].append(trigger_next_part)
+            #     dict_of_swapped_flights['was_health'].append(health_next_part)
+            if next_penalty_flag and equipment_next_flag:
                 good_next_partition = True
                 temp_partition = temp_partition_without_check
                 temp_trigger_part_for_find_next = trigger_next_part
@@ -706,13 +708,9 @@ def smart_swap(trigger_aircraft: int,
         if (good_prev_partition is True and empty_next_flag is True) or (
                 good_next_partition is True and empty_prev_flag is True):
             break
-    if trigger_flight_id == {'flight_id': 'FV6721', 'aircraft_id': 2, 'previous_solution_id': 32}:
-        print('FV6721')
-        print(trigger_next_part)
-        print(health_next_part)
-        print(good_next_partition)
-        print(empty_next_flag)
-        print(equipment_next_flag)
+        if iteration_count >= max_iterations:
+            print(f'looped')
+            break
     print(f'swapped')
     return from_partition_to_dataframe(temp_partition), dict_of_swapped_flights
 
@@ -1041,7 +1039,7 @@ def objective_function(previous_schedule: pd.DataFrame,
                        current_time: datetime,
                        time_delta: timedelta) -> int:
     return (schedule_differences(previous_schedule, new_schedule)
-            # + ts_time_shifts(new_schedule, technical_service_table, aircraft_equipment_table, current_time, time_delta)
+            + ts_time_shifts(new_schedule, technical_service_table, aircraft_equipment_table, current_time, time_delta)
             + penalty_function(schedule_part_for_penalty, schedule_part_for_equipment_penalty, flight_equipment_table,
                                aircraft_equipment_table))
 
@@ -1337,17 +1335,37 @@ if test_number == 5:
     dict_file = 'test_5/dict_of_swapped_test_5.json'
 
 
+if test_number == 6:
+    """Тест 6"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_6/df_aircraft.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_6/df_problematic_aircraft_equipment.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_6/df_problematic_flight_shift.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 22, 12, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=2)
+
+    result_file_name = 'test_6/new_schedule_RESULT_test_6.csv'
+    nearest_file_name = 'test_6/NEAREST_schedule_test_6.csv'
+    dict_file = 'test_6/dict_of_swapped_test_6.json'
+
+
 """Общие данные для всех тестов"""
 # авиарейсы
-flights = pd.read_csv('test_5/df_flights.csv', sep=';')
+flights = pd.read_csv('test_6/df_flights.csv', sep=';')
 # требования к вс на рейсе
-flight_equipments = pd.read_csv('test_5/df_flight_equipments.csv', sep=';')
+flight_equipments = pd.read_csv('test_6/df_flight_equipments.csv', sep=';')
 # текущее распределение вс на рейсы
-previous_solution = pd.read_csv('test_5/df_previous_solution.csv', sep=';')
+previous_solution = pd.read_csv('test_6/df_previous_solution.csv', sep=';')
 previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
 previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
 # тех обслуживание вс
-technical_service = pd.read_csv('test_5/df_technical_service.csv', sep=';')
+technical_service = pd.read_csv('test_6/df_technical_service.csv', sep=';')
 # DataFrame со списком disruptions по смене оборудования ВС
 table_with_equipment_disruptions = problematic_aircraft_equipment
 # DataFrame со списком disruptions по переносу времени рейсов
