@@ -408,13 +408,15 @@ def remake_technical_service_table(technical_service_table: pd.DataFrame, schedu
     """Извлекает из таблицы тех обслуживания строки, попадающие в нужный диапазон времени"""
     technical_service_table_copy = pd.DataFrame(columns=technical_service_table.columns)
     prev_aircraft_id = technical_service_table['aircraft_id'].iloc[0]
-    time_diapason = get_time_diapason_for_aircraft(prev_aircraft_id, schedule)
+    if prev_aircraft_id in schedule['aircraft_id'].tolist():
+        time_diapason = get_time_diapason_for_aircraft(prev_aircraft_id, schedule)
     for index, row in technical_service_table.iterrows():
         aircraft_id = row['aircraft_id']
-        if aircraft_id != prev_aircraft_id:
+        if aircraft_id != prev_aircraft_id and aircraft_id in schedule['aircraft_id'].tolist():
             time_diapason = get_time_diapason_for_aircraft(aircraft_id, schedule)
-        if (pd.to_datetime(row['time_finish'], dayfirst=True) <= time_diapason['max_time']
-                and pd.to_datetime(row['time_start'], dayfirst=True) >= time_diapason['min_time']):
+        if ((pd.to_datetime(row['time_finish'], dayfirst=True) <= time_diapason['max_time']
+                and pd.to_datetime(row['time_start'], dayfirst=True) >= time_diapason['min_time'])
+                and aircraft_id in schedule['aircraft_id'].tolist()):
             technical_service_table_copy.loc[len(technical_service_table_copy.index)] = row
     return technical_service_table_copy
 
@@ -576,9 +578,8 @@ def smart_swap(trigger_aircraft: int,
     prev_moved = False
     next_moved = False
 
-    temp_partition_without_check = None
-
     while True:
+        print('iterate')
         iteration_count += 1
         trigger_prev_part = extract_next_or_previous_part(trigger_aircraft, temp_trigger_part_for_find_prev,
                                                           partition_list, 'prev')
@@ -613,21 +614,16 @@ def smart_swap(trigger_aircraft: int,
                                                                  'prev',
                                                                  flight_equipment_table,
                                                                  aircraft_equipment_table))
-            # if equipment_prev_flag:
-            #     temp_partition = temp_partition_without_check
-            #     temp_trigger_part_for_find_prev = trigger_prev_part
-            #     temp_health_part_for_find_prev = health_prev_part
-            #     dict_of_swapped_flights['was_triggered'].append(trigger_prev_part)
-            #     dict_of_swapped_flights['was_health'].append(health_prev_part)
-            if prev_penalty_flag and equipment_prev_flag:
+            if equipment_prev_flag:
+                print('move prev')
                 good_prev_partition = True
                 temp_partition = temp_partition_without_check
                 temp_trigger_part_for_find_prev = trigger_prev_part
                 temp_health_part_for_find_prev = health_prev_part
                 dict_of_swapped_flights['was_triggered'].append(trigger_prev_part)
                 dict_of_swapped_flights['was_health'].append(health_prev_part)
-        # elif trigger_prev_part == [] or health_prev_part == []:
-        #     empty_prev_flag = True
+                if prev_penalty_flag:
+                    good_prev_partition = True
         elif (trigger_prev_part == [] and health_prev_part == []):
             empty_prev_flag = True
         else:
@@ -665,27 +661,19 @@ def smart_swap(trigger_aircraft: int,
                                                                  'next',
                                                                  flight_equipment_table,
                                                                  aircraft_equipment_table))
-            # if equipment_next_flag:
-            #     temp_partition = temp_partition_without_check
-            #     temp_trigger_part_for_find_next = trigger_next_part
-            #     temp_health_part_for_find_next = health_next_part
-            #     dict_of_swapped_flights['was_triggered'].append(trigger_next_part)
-            #     dict_of_swapped_flights['was_health'].append(health_next_part)
-            if next_penalty_flag and equipment_next_flag:
-                good_next_partition = True
+            if equipment_next_flag:
                 temp_partition = temp_partition_without_check
                 temp_trigger_part_for_find_next = trigger_next_part
                 temp_health_part_for_find_next = health_next_part
                 dict_of_swapped_flights['was_triggered'].append(trigger_next_part)
                 dict_of_swapped_flights['was_health'].append(health_next_part)
+                print('move next')
+                if next_penalty_flag:
+                    good_next_partition = True
         elif trigger_next_part == [] and health_next_part == []:
             empty_next_flag = True
         else:
             next_moved = False
-            # if temp_partition_without_check is not None:
-            #     temp_partition = temp_partition_without_check
-            #     dict_of_swapped_flights['was_triggered'].append(trigger_next_part)
-            #     dict_of_swapped_flights['was_health'].append(health_next_part)
 
         # print(trigger_next_part)
         # print(health_next_part)
@@ -694,6 +682,7 @@ def smart_swap(trigger_aircraft: int,
         # print(equipment_next_flag)
 
         if not prev_moved and not next_moved:
+            print('not moved')
             break
 
         if not equipment_next_flag and not equipment_prev_flag:
@@ -830,7 +819,7 @@ def equipment_checker_in_swap(new_schedule: pd.DataFrame,
         aircraft_equipment_table[aircraft_equipment_table['aircraft_id'] == aircraft_id]['equipment_id'].iloc[0]
     flag = True
     if next_or_prev_flag == 'prev':
-        if previous_part[0]['previous_solution_id'] - 1 in aircraft_flights['previous_solution_id'].tolist():
+        if previous_part[0]['previous_solution_id'] in aircraft_flights['previous_solution_id'].tolist():
             index_for_check_first = aircraft_flights[
                 aircraft_flights['previous_solution_id'] == previous_part[0]['previous_solution_id'] - 1].index[0]
         else:
@@ -849,9 +838,9 @@ def equipment_checker_in_swap(new_schedule: pd.DataFrame,
                 if aircraft_equipment not in flight_equipment:
                     flag = False
     elif next_or_prev_flag == 'next':
-        if previous_part[-1]['previous_solution_id'] + 1 in aircraft_flights['previous_solution_id'].tolist():
+        if previous_part[-1]['previous_solution_id'] in aircraft_flights['previous_solution_id'].tolist():
             index_for_check_last = aircraft_flights[
-                aircraft_flights['previous_solution_id'] == previous_part[-1]['previous_solution_id'] + 1].index[0]
+                aircraft_flights['previous_solution_id'] == previous_part[-1]['previous_solution_id']].index[0]
         else:
             index_for_check_last = aircraft_flights[
                 aircraft_flights['previous_solution_id'] == moved_part[-1]['previous_solution_id']].index[0]
@@ -864,6 +853,9 @@ def equipment_checker_in_swap(new_schedule: pd.DataFrame,
                     flight_equipment_table[flight_equipment_table['flight_id'] == flight_id]['equipment_ids'].iloc[
                         0]
                 flight_equipment = list(ast.literal_eval(flight_equipment))
+                print(flight_id)
+                print(flight_equipment)
+                print(aircraft_equipment)
                 if aircraft_equipment not in flight_equipment:
                     flag = False
     return flag
@@ -1258,6 +1250,17 @@ if test_number == 1:
     nearest_file_name = 'test_1/NEAREST_schedule_test_1.csv'
     dict_file = 'test_1/dict_of_swapped_test_1.json'
 
+    # авиарейсы
+    flights = pd.read_csv('csv_files/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('csv_files/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('csv_files/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('csv_files/df_technical_service.csv', sep=';')
+
 if test_number == 2:
     """Тест 2"""
     # Парк доступных вс
@@ -1276,6 +1279,17 @@ if test_number == 2:
     result_file_name = 'test_2/new_schedule_RESULT_test_2.csv'
     nearest_file_name = 'test_2/NEAREST_schedule_test_2.csv'
     dict_file = 'test_2/dict_of_swapped_test_2.json'
+
+    # авиарейсы
+    flights = pd.read_csv('csv_files/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('csv_files/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('csv_files/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('csv_files/df_technical_service.csv', sep=';')
 
 if test_number == 3:
     """Тест 3"""
@@ -1296,6 +1310,17 @@ if test_number == 3:
     nearest_file_name = 'test_3/NEAREST_schedule_test_3.csv'
     dict_file = 'test_3/dict_of_swapped_test_3.json'
 
+    # авиарейсы
+    flights = pd.read_csv('csv_files/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('csv_files/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('csv_files/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('csv_files/df_technical_service.csv', sep=';')
+
 if test_number == 4:
     """Тест 4"""
     # Парк доступных вс
@@ -1315,6 +1340,17 @@ if test_number == 4:
     nearest_file_name = 'test_4/NEAREST_schedule_test_4.csv'
     dict_file = 'test_4/dict_of_swapped_test_4.json'
 
+    # авиарейсы
+    flights = pd.read_csv('csv_files/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('csv_files/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('csv_files/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('csv_files/df_technical_service.csv', sep=';')
+
 if test_number == 5:
     """Тест 5"""
     # Парк доступных вс
@@ -1333,6 +1369,17 @@ if test_number == 5:
     result_file_name = 'test_5/new_schedule_RESULT_test_5.csv'
     nearest_file_name = 'test_5/NEAREST_schedule_test_5.csv'
     dict_file = 'test_5/dict_of_swapped_test_5.json'
+
+    # авиарейсы
+    flights = pd.read_csv('test_5/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('test_5/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('test_5/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('test_5/df_technical_service.csv', sep=';')
 
 
 if test_number == 6:
@@ -1354,18 +1401,170 @@ if test_number == 6:
     nearest_file_name = 'test_6/NEAREST_schedule_test_6.csv'
     dict_file = 'test_6/dict_of_swapped_test_6.json'
 
+    # авиарейсы
+    flights = pd.read_csv('test_6/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('test_6/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('test_6/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('test_6/df_technical_service.csv', sep=';')
+
+if test_number == 7:
+    """Тест 7"""
+
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_7/df_aircraft.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_7/df_problematic_aircraft_equipment.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_7/df_problematic_flight_shift.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 23, 0, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=2)
+
+    result_file_name = 'test_7/new_schedule_RESULT_test_7.csv'
+    nearest_file_name = 'test_7/NEAREST_schedule_test_7.csv'
+    dict_file = 'test_7/dict_of_swapped_test_7.json'
+
+    # авиарейсы
+    flights = pd.read_csv('test_7/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('test_7/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('test_7/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('test_7/df_technical_service.csv', sep=';')
+
+if test_number == 8:
+    """Тест 8"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_8/df_aircraft.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_8/df_problematic_aircraft_equipment.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_8/df_problematic_flight_shift.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 22, 0, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=2)
+
+    result_file_name = 'test_8/new_schedule_RESULT_test_8.csv'
+    nearest_file_name = 'test_8/NEAREST_schedule_test_8.csv'
+    dict_file = 'test_8/dict_of_swapped_test_8.json'
+
+    # авиарейсы
+    flights = pd.read_csv('test_8/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('test_8/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('test_8/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('test_8/df_technical_service.csv', sep=';')
+
+if test_number == 9:
+    """Тест 9"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_9/df_aircraft.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_9/df_problematic_aircraft_equipment.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_9/df_problematic_flight_shift.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 21, 0, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=2)
+
+    result_file_name = 'test_9/new_schedule_RESULT_test_9.csv'
+    nearest_file_name = 'test_9/NEAREST_schedule_test_9.csv'
+    dict_file = 'test_9/dict_of_swapped_test_9.json'
+
+    # авиарейсы
+    flights = pd.read_csv('test_9/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('test_9/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('test_9/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('test_9/df_technical_service.csv', sep=';')
+
+if test_number == 10:
+    """Тест 10"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_10/df_aircraft.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_10/df_problematic_aircraft_equipment.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_10/df_problematic_flight_shift.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 20, 12, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=3)
+
+    result_file_name = 'test_10/new_schedule_RESULT_test_10.csv'
+    nearest_file_name = 'test_10/NEAREST_schedule_test_10.csv'
+    dict_file = 'test_10/dict_of_swapped_test_10.json'
+
+    # авиарейсы
+    flights = pd.read_csv('test_10/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('test_10/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('test_10/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('test_10/df_technical_service.csv', sep=';')
+
+if test_number == 11:
+    """Тест 11"""
+    # Парк доступных вс
+    aircraft_with_spare = pd.read_csv('test_11/df_aircraft_with_spare_test_11.csv', sep=';')
+    # disruption: изменение оснащения вс
+    problematic_aircraft_equipment = pd.read_csv('test_11/df_problematic_aircraft_equipment_test_11.csv', sep=';')
+    # disruption: перенос рейсов
+    problematic_flight_shift = pd.read_csv('test_11/df_problematic_flight_shift_test_11.csv', sep=';')
+    # Парк доступных вс c измененным оборудованием
+    updated_aircraft_with_spare = change_aircraft_equipment(problematic_aircraft_equipment, aircraft_with_spare)
+    # Текущий момент времени
+    test_time = datetime(2025, 1, 23, 0, 0)
+    # Сколько дней от текущего момента смотрим
+    time_delta = timedelta(days=2)
+
+    result_file_name = 'test_11/new_schedule_RESULT_test_11.csv'
+    nearest_file_name = 'test_11/NEAREST_schedule_test_11.csv'
+    dict_file = 'test_11/dict_of_swapped_test_11.json'
+
+    # авиарейсы
+    flights = pd.read_csv('csv_files/df_flights.csv', sep=';')
+    # требования к вс на рейсе
+    flight_equipments = pd.read_csv('test_11/df_flight_equipments.csv', sep=';')
+    # текущее распределение вс на рейсы
+    previous_solution = pd.read_csv('csv_files/df_previous_solution.csv', sep=';')
+    previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+    previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+    # тех обслуживание вс
+    technical_service = pd.read_csv('csv_files/df_technical_service.csv', sep=';')
+
 
 """Общие данные для всех тестов"""
-# авиарейсы
-flights = pd.read_csv('test_6/df_flights.csv', sep=';')
-# требования к вс на рейсе
-flight_equipments = pd.read_csv('test_6/df_flight_equipments.csv', sep=';')
-# текущее распределение вс на рейсы
-previous_solution = pd.read_csv('test_6/df_previous_solution.csv', sep=';')
-previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
-previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
-# тех обслуживание вс
-technical_service = pd.read_csv('test_6/df_technical_service.csv', sep=';')
 # DataFrame со списком disruptions по смене оборудования ВС
 table_with_equipment_disruptions = problematic_aircraft_equipment
 # DataFrame со списком disruptions по переносу времени рейсов
@@ -1394,7 +1593,7 @@ result_schedule, dict_of_swapped = local_optimisation_algorithm(table_with_equip
                                                                 result_file_name,
                                                                 dict_file)
 
-# dict_of_swapped = dict_of_swapped_from_json('test_4/dict_of_swapped_test_4.json')
+# dict_of_swapped = dict_of_swapped_from_json(dict_file)
 
 nearest = pd.read_csv(nearest_file_name, sep=';')
 gantt_chart(nearest, dict_of_swapped, True)
@@ -1403,9 +1602,32 @@ result = pd.read_csv(result_file_name, sep=';')
 gantt_chart(result, dict_of_swapped, True)
 
 ts = remake_technical_service_table(table_with_technical_service_info, nearest)
-part = base_airports_partition(nearest, 'KJA', 'LED')
-f = [False]
-# after_swap = smart_swap(3, 16, part, nearest, {'flight_id': 'FV6877', 'aircraft_id': 3, 'previous_solution_id': 59}, flight_equipments, updated_aircraft, f)
+# part = base_airports_partition(nearest, 'KJA', 'LED')
+# f = [False]
+# after_swap, dict = smart_swap(3, 1, part, nearest, {'flight_id': 'FV6877', 'aircraft_id': 3, 'previous_solution_id': 48}, flight_equipments, updated_aircraft_with_spare, f)
+# dict_of_all_swapped_flights = {
+#         'was_triggered': [[d['previous_solution_id'] for d in sublist] for sublist in dict.get('was_triggered', []) if sublist != []],
+#         'was_health': [[d['previous_solution_id'] for d in sublist] for sublist in dict.get('was_health', []) if sublist != []]
+#     }
+# print(dict_of_all_swapped_flights)
+
+# gantt_chart(previous_solution, {'was_triggered': [], 'was_health': []}, True)
+
+# previous_solution = pd.read_csv('csv_files/df_previous_solution.csv', sep=';')
+# previous_solution['arrival_time'] = pd.to_datetime(previous_solution['arrival_time'], format="%d.%m.%Y %H:%M")
+# previous_solution['departure_time'] = pd.to_datetime(previous_solution['departure_time'], format="%d.%m.%Y %H:%M")
+#
+# test_time = datetime(2025, 1, 22, 0, 0)
+# # Сколько дней от текущего момента смотрим
+# time_delta = timedelta(days=3)
+# print(test_time, time_delta)
+# nearest = nearest_flights_selection(previous_solution, test_time, time_delta, 'KJA', 'LED')
+# # print(nearest)
+# gantt_chart(nearest, {'was_triggered': [], 'was_health': []}, True)
+# gantt_chart(nearest, dict_of_all_swapped_flights, True)
+# gantt_chart(nearest, dict_of_all_swapped_flights, True, True)
+# gantt_chart(after_swap, dict_of_all_swapped_flights, True)
+
 # after_swap.to_csv('csv_files/test.csv', index=False, sep=';')
 # current_flights_for_penalty = after_swap.loc[
 #                             (after_swap['aircraft_id'] == 3)
