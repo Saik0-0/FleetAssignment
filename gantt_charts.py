@@ -4,13 +4,16 @@ import plotly.express as px
 import matplotlib
 
 
+temp_dict = {'was_triggered': [[50, 51]], 'was_health': [[2, 3]]}
+
+
 # Генератор цветов
 def get_color_palette(n):
-    cmap = matplotlib.colormaps['hsv'].resampled(n)
+    cmap = matplotlib.colormaps['Set1'].resampled(n)
     return [matplotlib.colors.to_hex(cmap(i)) for i in range(n)]
 
 
-def gantt_chart(result_schedule: pd.DataFrame, dict_of_swapped: dict, spare_aircraft=None):
+def gantt_chart(result_schedule: pd.DataFrame, dict_of_swapped: dict, spare_aircraft=None, flag=False):
     schedule = copy.deepcopy(result_schedule)
     schedule['aircraft_id'] = schedule['aircraft_id'].astype(str)
 
@@ -22,12 +25,29 @@ def gantt_chart(result_schedule: pd.DataFrame, dict_of_swapped: dict, spare_airc
 
     for group_idx, group in enumerate(all_groups):
         for previous_solution_id in group:
-            color_map[previous_solution_id] = colors[group_idx]
+            if flag:
+                if group in temp_dict['was_triggered'] + temp_dict['was_health']:
+                    color_map[previous_solution_id] = colors[group_idx]
+            else:
+                color_map[previous_solution_id] = colors[group_idx]
+    # # === 1. Подготовка структуры с уникальными цветами для каждого подсписка ===
+    # # Объединяем подсписки из двух групп: 'was_triggered' и 'was_health'
+    # all_groups = dict_of_swapped['was_triggered'] + dict_of_swapped['was_health']
+    # # Генерируем столько цветов, сколько подсписков
+    # colors = get_color_palette(len(all_groups))
+    # color_map = {}
+    # # Для каждого подсписка (группы) назначаем единый цвет всем contained previous_solution_id
+    # for group_idx, group in enumerate(all_groups):
+    #     for previous_solution_id in group:
+    #         color_map[previous_solution_id] = colors[group_idx]
 
     # === 2. Обработка spare_aircraft ===
     if spare_aircraft:
         all_aircraft_ids = range(14, 19)
-        missing_ids = set(all_aircraft_ids) - set(schedule['aircraft_id'].unique())
+        all_aircraft_ids = range(14, 16)
+        # missing_ids = set(all_aircraft_ids) - set(schedule['aircraft_id'].unique())
+        # all_aircraft_ids = range(5, 7)
+        missing_ids = all_aircraft_ids
         if missing_ids:
             base_time = schedule['departure_time'].iloc[0]
             missing_df = pd.DataFrame({
@@ -60,6 +80,7 @@ def gantt_chart(result_schedule: pd.DataFrame, dict_of_swapped: dict, spare_airc
         sorted_ids = list(range(1, 19))
     else:
         sorted_ids = list(range(1, 14))
+    # sorted_ids = ['1', '2', '3', '4', '5', '6']
     # Подготовим многострочный текст
     schedule['text_block'] = schedule.apply(
         lambda row: (
@@ -76,6 +97,7 @@ def gantt_chart(result_schedule: pd.DataFrame, dict_of_swapped: dict, spare_airc
         y='aircraft_id',
         color='color',
         hover_name='flight_id',
+        hover_data='previous_solution_id',
         text='text_block',  # <-- Многострочный текст
         color_discrete_sequence=schedule['color'].unique()
     )
@@ -84,7 +106,7 @@ def gantt_chart(result_schedule: pd.DataFrame, dict_of_swapped: dict, spare_airc
         textposition='inside',
         texttemplate='%{text}',  # Используем наш многострочный текст
         insidetextanchor='middle',
-        textfont=dict(size=12, color='black'),
+        textfont=dict(color='black'),
         textangle=0  # <-- вот это фиксирует горизонтальный угол
     )
     # Настраиваем порядок категорий для оси y
@@ -98,7 +120,15 @@ def gantt_chart(result_schedule: pd.DataFrame, dict_of_swapped: dict, spare_airc
         yaxis_title='aircraft_id',
         xaxis_title='time',
         showlegend=False,
-        uniformtext_minsize=12,  # тут регулируй размер
-        uniformtext_mode='show'
+        # uniformtext_minsize=6,  # тут регулируй размер
+        uniformtext_minsize=9,  # тут регулируй размер
+        # uniformtext_minsize=14,  # тут регулируй размер
+        uniformtext_mode='show',
+        # width=2000, height=1000
+        width=1800, height=800
+        # width=1800, height=500
     )
+
+    # gantt.write_image("plot.pdf")
+    # gantt.write_image("plot.pdf")
     gantt.show()
